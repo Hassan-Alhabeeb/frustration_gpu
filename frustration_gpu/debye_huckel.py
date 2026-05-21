@@ -91,8 +91,6 @@ LOC budget: ~280 lines + this docstring.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import torch
 
 from ._contact_common import (
@@ -104,7 +102,6 @@ from ._contact_common import (
     _pairwise_distance_safe,
     _resolve_contact_coords,
 )
-
 
 # --- numerical constants ------------------------------------------------------
 # All values from ``[DebyeHuckel]`` in fix_backbone_coeff.data (see
@@ -144,7 +141,7 @@ DH_CHARGES_FLOAT: tuple[float, ...] = (
 
 
 def aa_charge_vector(
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
 ) -> torch.Tensor:
     """Return the 20-element AA → charge lookup tensor.
@@ -184,19 +181,19 @@ def _per_residue_charge(
 
 # --- public API ---------------------------------------------------------------
 def debye_huckel_energy(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     *,
     k_QQ: float = DH_K_QQ_DEFAULT,
     screening_length: float = DH_SCREENING_LENGTH_A,
     k_screening: float = DH_K_SCREENING,
     min_seq_sep: int = DH_MIN_SEQ_SEP,
     epsilon: float = DH_EPSILON,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     return_pair_matrix: bool = False,
-    _context: "Optional[ContactContext | SparseContactContext]" = None,
+    _context: ContactContext | SparseContactContext | None = None,
     sparse: bool = False,
     use_cdist: bool = False,
-) -> torch.Tensor | Dict[str, torch.Tensor]:
+) -> torch.Tensor | dict[str, torch.Tensor]:
     """Compute the AWSEM Debye-Hückel electrostatic energy ``V_DH``.
 
     Parameters
@@ -460,7 +457,7 @@ def debye_huckel_pair_energy(
     screening_length: float = DH_SCREENING_LENGTH_A,
     k_screening: float = DH_K_SCREENING,
     epsilon: float = DH_EPSILON,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
 ) -> torch.Tensor:
     """Scalar V_DH for a single (r, aa_i, aa_j) triple — used by tests.

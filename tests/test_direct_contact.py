@@ -33,7 +33,6 @@ from __future__ import annotations
 import math
 import sys
 from pathlib import Path
-from typing import Tuple
 
 import pytest
 import torch
@@ -43,16 +42,16 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.burial import burial_energy                              # noqa: E402
-from frustration_gpu.contact_gamma import load_direct_gamma                   # noqa: E402
-from frustration_gpu.direct_contact import (                                  # noqa: E402
+from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
+
+from frustration_gpu.contact_gamma import load_direct_gamma  # noqa: E402
+from frustration_gpu.direct_contact import (  # noqa: E402
     direct_contact_energy,
     direct_pair_energy,
 )
-from frustration_gpu.parameters import load_gamma_tables                      # noqa: E402
-from frustration_gpu.parser import parse_pdb                                  # noqa: E402
+from frustration_gpu.parameters import load_gamma_tables  # noqa: E402
+from frustration_gpu.parser import parse_pdb  # noqa: E402
 
-from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
 # 5AON tertiary frustration dump. The cpu_baseline tree was reorganised on
 # 2026-05-20 to split outputs by mode; the configurational dump is the file
 # the Phase 1.5 spec audit was performed against.
@@ -78,7 +77,7 @@ def parsed_11bg():
     return parse_pdb(PDB_DIR / "11BG.pdb", dtype=torch.float64)
 
 
-def _load_dump_rows() -> list[Tuple[int, int, int, int, float, float, float, str, str, float]]:
+def _load_dump_rows() -> list[tuple[int, int, int, int, float, float, float, str, str, float]]:
     """Read columns we care about from the tertiary_frustration.dat dump.
 
     Returns a list of tuples (i, j, chain_i, chain_j, r_ij, rho_i, rho_j, a_i,
@@ -140,7 +139,10 @@ def _burial_pair_kcal(aa_idx: int, rho: float) -> float:
     this test. Mirrors ``fix_backbone.cpp:5478-5500``.
     """
     from frustration_gpu.parameters import (
-        BURIAL_KAPPA, BURIAL_RHO_MIN, BURIAL_RHO_MAX, load_burial_gamma,
+        BURIAL_KAPPA,
+        BURIAL_RHO_MAX,
+        BURIAL_RHO_MIN,
+        load_burial_gamma,
     )
     bg = load_burial_gamma(dtype=torch.float64)
     row = bg[aa_idx].tolist()

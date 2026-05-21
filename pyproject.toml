@@ -103,8 +103,9 @@ select = ["E", "F", "W", "I", "UP", "B"]
 ignore = [
     "E501",  # line length handled by formatter
     "B008",  # function call in default argument (fine for tensors)
+    "B905",  # zip(strict=) — fine to omit on equal-length tensors
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["B011"]
+"tests/*" = ["B011", "E402", "F841", "B007"]
 "examples/*" = ["E402", "F401"]

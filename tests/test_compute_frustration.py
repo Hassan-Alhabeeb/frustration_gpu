@@ -27,10 +27,12 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu import FrustrationResult, compute_frustration  # noqa: E402
+from _paths import (
+    DUMP_ROOT,  # noqa: E402
+    PDB_DIR,  # noqa: E402
+)
 
-from _paths import PDB_DIR  # noqa: E402
-from _paths import DUMP_ROOT  # noqa: E402
+from frustration_gpu import FrustrationResult, compute_frustration  # noqa: E402
 
 
 def _has_pdb(pdb_id: str) -> bool:
@@ -194,7 +196,7 @@ def test_compute_frustration_residues_filter():
     # Every row in the subset must involve at least one of the subset residues.
     in_subset_i = result_sub.pair_records["Res1"].isin(subset_resnums)
     in_subset_j = result_sub.pair_records["Res2"].isin(subset_resnums)
-    assert ((in_subset_i | in_subset_j)).all(), (
+    assert (in_subset_i | in_subset_j).all(), (
         "subset filter let through a pair with neither residue in subset"
     )
     # Strict subset of full pair list — same FrstIndex on overlap.
@@ -410,7 +412,6 @@ def test_calculate_frustration_drop_in_alias():
       * ``graphics=True`` is accepted but warns (doesn't crash).
       * ``is_mutation_calculation=True`` is back-compat synonym for mode="mutational".
     """
-    import warnings
 
     from frustration_gpu import calculate_frustration  # noqa: E402
 

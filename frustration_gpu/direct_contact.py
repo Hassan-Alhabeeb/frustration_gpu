@@ -117,7 +117,6 @@ LOC budget: ~250 lines of code + this docstring.
 from __future__ import annotations
 
 import warnings
-from typing import Dict, Optional
 
 import torch
 
@@ -132,7 +131,6 @@ from ._contact_common import (
 )
 from .contact_gamma import load_direct_gamma
 
-
 # --- numerical constants (Å units) --------------------------------------------
 # These mirror the C++ ``[Water]`` block values (``fix_backbone.cpp:257-266``).
 # Kept here as module-level defaults; the public API exposes them as keyword
@@ -145,20 +143,20 @@ CONTACT_MIN_SEQ_SEP: int = 2   # ``|i - j| >= 2`` from [Water]'s "2 2" line
 
 # --- public API ---------------------------------------------------------------
 def direct_contact_energy(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     *,
-    gamma_direct: Optional[torch.Tensor] = None,
+    gamma_direct: torch.Tensor | None = None,
     k_water: float = 1.0,
     r_min: float = DIRECT_R_MIN_A,
     r_max: float = DIRECT_R_MAX_A,
     eta: float = DIRECT_ETA_PER_A,
     contact_min_seq_sep: int = CONTACT_MIN_SEQ_SEP,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     return_pair_matrix: bool = False,
-    _context: "Optional[ContactContext | SparseContactContext]" = None,
+    _context: ContactContext | SparseContactContext | None = None,
     sparse: bool = False,
     use_cdist: bool = False,
-) -> torch.Tensor | Dict[str, torch.Tensor]:
+) -> torch.Tensor | dict[str, torch.Tensor]:
     """Compute the AWSEM direct-contact energy ``V_direct`` for a protein.
 
     Parameters
@@ -444,12 +442,12 @@ def direct_pair_energy(
     aa_i: int,
     aa_j: int,
     *,
-    gamma_direct: Optional[torch.Tensor] = None,
+    gamma_direct: torch.Tensor | None = None,
     k_water: float = 1.0,
     r_min: float = DIRECT_R_MIN_A,
     r_max: float = DIRECT_R_MAX_A,
     eta: float = DIRECT_ETA_PER_A,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
 ) -> torch.Tensor:
     """Scalar V_direct for a single (r, aa_i, aa_j) triple — used by tests.

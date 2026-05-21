@@ -40,8 +40,6 @@ see PHASE_1_STATUS.md.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import torch
 
 from ._contact_common import _check_no_dna_sentinel
@@ -209,7 +207,7 @@ def compute_rho(
     return rho
 
 
-def _resolve_density_coords(parsed: Dict[str, torch.Tensor | list]) -> torch.Tensor:
+def _resolve_density_coords(parsed: dict[str, torch.Tensor | list]) -> torch.Tensor:
     """Return CB coords with CA substituted where CB is NaN (GLY or missing).
 
     Mirrors OpenAWSEM's ``cb_fixed`` substitution at contactTerms.py:166. The
@@ -223,7 +221,7 @@ def _resolve_density_coords(parsed: Dict[str, torch.Tensor | list]) -> torch.Ten
 
 
 def burial_density(
-    parsed: Dict[str, torch.Tensor | list],
+    parsed: dict[str, torch.Tensor | list],
     *,
     sparse: bool = False,
     sparse_cutoff_a: float = 9.5,
@@ -253,7 +251,7 @@ def burial_density(
 
     # build chain_index: contiguous ints, new chain -> new int
     chain_ids = parsed["chain_ids"]
-    cid_map: Dict[str, int] = {}
+    cid_map: dict[str, int] = {}
     chain_index_list: list[int] = []
     for c in chain_ids:
         if c not in cid_map:
@@ -271,15 +269,15 @@ def burial_density(
 
 
 def burial_energy(
-    parsed: Dict[str, torch.Tensor | list],
+    parsed: dict[str, torch.Tensor | list],
     *,
     k_contact: float = 1.0,  # kcal/mol (LAMMPS units real). Was 4.184 kJ/mol (OpenAWSEM/OpenMM convention) — switched 2026-05-20 after Opus C++ audit + VM dump confirmed LAMMPS-AWSEM uses kcal/mol directly.
     k_awsem: float = 1.0,
-    burial_gamma: Optional[torch.Tensor] = None,
+    burial_gamma: torch.Tensor | None = None,
     return_per_residue: bool = True,
     sparse: bool = False,
     sparse_cutoff_a: float = 9.5,
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Compute the AWSEM burial energy.
 
     Parameters

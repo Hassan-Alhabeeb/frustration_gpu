@@ -17,8 +17,8 @@ file emission. Two layers of validation:
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -28,8 +28,13 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.decoys import configurational_decoy_stats, lammps_dump_rho     # noqa: E402
-from frustration_gpu.frustration import (                                            # noqa: E402
+from _paths import (
+    DUMP_ROOT,  # noqa: E402
+    PDB_DIR,  # noqa: E402
+)
+
+from frustration_gpu.decoys import configurational_decoy_stats, lammps_dump_rho  # noqa: E402
+from frustration_gpu.frustration import (  # noqa: E402
     CLASS_HIGHLY,
     CLASS_MINIMALLY,
     CLASS_NEUTRAL,
@@ -43,12 +48,10 @@ from frustration_gpu.frustration import (                                       
     emit_tertiary_frustration_dat,
     welltype_from_contact,
 )
-from frustration_gpu.mutational_decoys import mutational_decoy_stats                # noqa: E402
-from frustration_gpu.parser import parse_pdb                                         # noqa: E402
-from frustration_gpu.singleresidue_decoys import singleresidue_decoy_stats          # noqa: E402
+from frustration_gpu.mutational_decoys import mutational_decoy_stats  # noqa: E402
+from frustration_gpu.parser import parse_pdb  # noqa: E402
+from frustration_gpu.singleresidue_decoys import singleresidue_decoy_stats  # noqa: E402
 
-from _paths import PDB_DIR  # noqa: E402
-from _paths import DUMP_ROOT  # noqa: E402
 PANEL = ["5AON", "11BG", "1O3S", "3F9M"]
 
 

@@ -52,8 +52,6 @@ Pure PyTorch, single function. ~70 LOC plus this docstring.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 
 from .parameters import load_gamma_tables
@@ -61,7 +59,7 @@ from .parameters import load_gamma_tables
 
 def load_direct_gamma(
     *,
-    device: Optional[str | torch.device] = None,
+    device: str | torch.device | None = None,
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
     """Return the direct-contact gamma table as a symmetric (20, 20) tensor.
@@ -100,7 +98,7 @@ def load_direct_gamma(
 
 def load_mediated_gamma(
     *,
-    device: Optional[str | torch.device] = None,
+    device: str | torch.device | None = None,
     dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return the mediated-contact gamma tables (protein, water).

@@ -69,14 +69,14 @@ LOC budget: ~200 lines + this docstring.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 import torch
 
 from .parser import ONE_TO_IDX
 
 # Inverse of the gamma-column AA ordering (idx -> one-letter code).
-_IDX_TO_ONE: List[str] = [None] * 20
+_IDX_TO_ONE: list[str] = [None] * 20
 for _aa, _i in ONE_TO_IDX.items():
     _IDX_TO_ONE[_i] = _aa
 
@@ -96,13 +96,13 @@ WELL_SHORT: int = 0
 WELL_WATER_MEDIATED: int = 1
 WELL_LONG: int = 2
 
-_CLASS_NAMES: Dict[int, str] = {
+_CLASS_NAMES: dict[int, str] = {
     CLASS_HIGHLY: "highly",
     CLASS_NEUTRAL: "neutral",
     CLASS_MINIMALLY: "minimally",
 }
 
-_WELL_NAMES: Dict[int, str] = {
+_WELL_NAMES: dict[int, str] = {
     WELL_SHORT: "short",
     WELL_WATER_MEDIATED: "water-mediated",
     WELL_LONG: "long",
@@ -231,12 +231,12 @@ def welltype_from_contact(
 
 
 # --- helpers for the file writers --------------------------------------------
-def _aa_idx_to_letter(aa_idx: torch.Tensor) -> List[str]:
+def _aa_idx_to_letter(aa_idx: torch.Tensor) -> list[str]:
     """Vectorised int → one-letter mapping using the OpenAWSEM gamma column order."""
     return [_IDX_TO_ONE[int(a)] for a in aa_idx.tolist()]
 
 
-def _chain_letters(chain_ids: List[str], i_indices: torch.Tensor) -> List[str]:
+def _chain_letters(chain_ids: list[str], i_indices: torch.Tensor) -> list[str]:
     """Pick chain letters at the supplied 0-indexed positions."""
     out = []
     idx_list = i_indices.tolist()
@@ -245,22 +245,22 @@ def _chain_letters(chain_ids: List[str], i_indices: torch.Tensor) -> List[str]:
     return out
 
 
-def _author_resnum(residue_numbers: torch.Tensor, i_indices: torch.Tensor) -> List[int]:
+def _author_resnum(residue_numbers: torch.Tensor, i_indices: torch.Tensor) -> list[int]:
     """Pick PDB author residue numbers at the supplied 0-indexed positions."""
     return [int(residue_numbers[int(k)].item()) for k in i_indices.tolist()]
 
 
-def _chain_int_index(chain_ids: List[str], idx: torch.Tensor) -> List[int]:
+def _chain_int_index(chain_ids: list[str], idx: torch.Tensor) -> list[int]:
     """Convert chain letters at given positions to the 1-indexed integer
     LAMMPS uses in the raw dump (order-of-first-appearance, +1)."""
-    cid_map: Dict[str, int] = {}
+    cid_map: dict[str, int] = {}
     for c in chain_ids:
         if c not in cid_map:
             cid_map[c] = len(cid_map) + 1
     return [cid_map[chain_ids[int(k)]] for k in idx.tolist()]
 
 
-def _xb_coords(coords: Dict[str, torch.Tensor]) -> torch.Tensor:
+def _xb_coords(coords: dict[str, torch.Tensor]) -> torch.Tensor:
     """Return the LAMMPS dump coordinate per residue.
 
     LAMMPS-AWSEM (``fix_backbone.cpp:5089-5091, 5155-5156``) writes::
@@ -302,7 +302,7 @@ def _xb_coords(coords: Dict[str, torch.Tensor]) -> torch.Tensor:
 def emit_tertiary_frustration_dat(
     *,
     mode: Literal["configurational", "mutational"],
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     pair_i: torch.Tensor,                  # 0-indexed
     pair_j: torch.Tensor,                  # 0-indexed
     r_ij: torch.Tensor,
@@ -312,7 +312,7 @@ def emit_tertiary_frustration_dat(
     decoy_mean: torch.Tensor,              # scalar (config) or (N_pair,) (mut)
     decoy_std: torch.Tensor,               # scalar (config) or (N_pair,) (mut)
     output_path: str | Path,
-    fi: Optional[torch.Tensor] = None,
+    fi: torch.Tensor | None = None,
     precision: int = 3,
 ) -> None:
     """Write the LAMMPS-AWSEM raw ``tertiary_frustration.dat`` format.
@@ -395,7 +395,7 @@ def emit_tertiary_frustration_dat(
         f"{{:{width}.{f}f}}"
     )
 
-    lines: List[str] = [
+    lines: list[str] = [
         "# i j i_chain j_chain xi yi zi xj yj zj r_ij rho_i rho_j a_i a_j "
         "native_energy <decoy_energies> std(decoy_energies) f_ij",
         "# timestep: 0",
@@ -418,13 +418,13 @@ def emit_tertiary_frustration_dat(
 
 def emit_singleresidue_dat(
     *,
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     rho: torch.Tensor,
     e_native: torch.Tensor,
     decoy_mean: torch.Tensor,
     decoy_std: torch.Tensor,
     output_path: str | Path,
-    fi: Optional[torch.Tensor] = None,
+    fi: torch.Tensor | None = None,
     raw: bool = True,
     precision: int = 3,
 ) -> None:
@@ -478,7 +478,7 @@ def emit_singleresidue_dat(
 
     f = precision
     width = max(8, f + 5)
-    lines: List[str] = []
+    lines: list[str] = []
     if raw:
         lines.append(
             "# i i_chain xi yi zi rho_i a_i native_energy <decoy_energies> "
@@ -508,7 +508,7 @@ def emit_singleresidue_dat(
 
 def emit_postprocessed_pair_dat(
     *,
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     pair_i: torch.Tensor,
     pair_j: torch.Tensor,
     r_ij: torch.Tensor,
@@ -518,9 +518,9 @@ def emit_postprocessed_pair_dat(
     decoy_mean: torch.Tensor,
     decoy_std: torch.Tensor,
     output_path: str | Path,
-    fi: Optional[torch.Tensor] = None,
-    welltype: Optional[torch.Tensor] = None,
-    frst_state: Optional[torch.Tensor] = None,
+    fi: torch.Tensor | None = None,
+    welltype: torch.Tensor | None = None,
+    frst_state: torch.Tensor | None = None,
     precision: int = 3,
 ) -> None:
     """Write the frustratometeR-style post-processed contact dat.
@@ -576,7 +576,7 @@ def emit_postprocessed_pair_dat(
     fs_list = frst_state.tolist()
 
     f = precision
-    lines: List[str] = [
+    lines: list[str] = [
         "Res1 Res2 ChainRes1 ChainRes2 DensityRes1 DensityRes2 AA1 AA2 "
         "NativeEnergy DecoyEnergy SDEnergy FrstIndex Welltype FrstState"
     ]

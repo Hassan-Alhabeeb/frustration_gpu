@@ -60,8 +60,6 @@ LOC budget: ~300-400 lines + this docstring.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import torch
 
 from ._contact_common import (
@@ -72,10 +70,10 @@ from ._contact_common import (
 from .decoys import (
     DEFAULT_CONTACT_CUTOFF_A,
     DEFAULT_N_DECOYS,
-    DIRECT_R_MIN_A,
     DIRECT_R_MAX_A,
-    MEDIATED_R_MIN_A,
+    DIRECT_R_MIN_A,
     MEDIATED_R_MAX_A,
+    MEDIATED_R_MIN_A,
     WATER_ETA_PER_A,
     WATER_ETA_SIGMA,
     WATER_RHO_0,
@@ -89,12 +87,10 @@ from .mutational_decoys import (
     PAIR_MIN_SEQ_SEP,
     _burial_residue_energy,
     _choose_alpha_chunk,
-    _water_pair_full,
     _water_per_alpha_fused,
     _water_rho_terms,
 )
 from .parameters import BURIAL_KAPPA, BURIAL_RHO_MAX, BURIAL_RHO_MIN
-
 
 # ---------------------------------------------------------------------------
 # Precompute W_sr[i, α]: per-anchor per-alphabet contact-energy sum
@@ -225,14 +221,14 @@ def _sample_aa_per_residue(
 # ---------------------------------------------------------------------------
 
 def singleresidue_decoy_stats(
-    coords: Dict[str, torch.Tensor],
-    rho: Optional[torch.Tensor] = None,
+    coords: dict[str, torch.Tensor],
+    rho: torch.Tensor | None = None,
     *,
     n_decoys: int = DEFAULT_N_DECOYS,
     contact_cutoff: float = DEFAULT_CONTACT_CUTOFF_A,
     pair_min_seq_sep: int = PAIR_MIN_SEQ_SEP,
     seed: int = 0,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
     k_water: float = 1.0,
     k_burial: float = 1.0,
@@ -246,8 +242,8 @@ def singleresidue_decoy_stats(
     burial_kappa: float = BURIAL_KAPPA,
     burial_rho_min: tuple = BURIAL_RHO_MIN,
     burial_rho_max: tuple = BURIAL_RHO_MAX,
-    _context: Optional[ContactContext] = None,
-) -> Dict[str, torch.Tensor]:
+    _context: ContactContext | None = None,
+) -> dict[str, torch.Tensor]:
     """Compute per-residue (E_native, decoy_mean, decoy_std, FI) for singleresidue.
 
     Parameters

@@ -25,14 +25,17 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from _paths import (
+    DUMP_ROOT,  # noqa: E402
+    PDB_DIR,  # noqa: E402
+)
+
 from frustration_gpu import compute_frustration  # noqa: E402
 from frustration_gpu.density import (  # noqa: E402
     compute_residue_density,
     emit_5adens_dat,
 )
 
-from _paths import PDB_DIR  # noqa: E402
-from _paths import DUMP_ROOT  # noqa: E402
 PANEL = ["5AON", "11BG", "1O3S", "3F9M"]
 
 
@@ -400,6 +403,7 @@ def test_parser_keep_incomplete_backbone_default_drops_missing_atoms():
     the filter.
     """
     import tempfile
+
     from frustration_gpu.parser import parse_pdb
 
     # Make a tiny PDB with one normal residue and one missing-O residue.

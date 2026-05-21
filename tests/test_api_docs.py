@@ -34,7 +34,7 @@ import re
 import sys
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import pytest
 
@@ -107,7 +107,7 @@ def _resolve_symbolic_default(s: str) -> Any:
     return inspect.Parameter.empty
 
 
-def _parse_signature_block(body: str) -> Tuple[str, Dict[str, str]] | None:
+def _parse_signature_block(body: str) -> tuple[str, dict[str, str]] | None:
     """Extract ``(function_name, {kwarg_name: default_literal})`` from a code block.
 
     Returns None if the block is not a function signature (no ``(`` or
@@ -169,7 +169,7 @@ def _parse_signature_block(body: str) -> Tuple[str, Dict[str, str]] | None:
     func_def = tree.body[0]
     assert isinstance(func_def, ast.FunctionDef)
 
-    kwargs: Dict[str, str] = {}
+    kwargs: dict[str, str] = {}
     # ast separates positional/positional-or-keyword args from kw-only args.
     all_args = list(func_def.args.args) + list(func_def.args.kwonlyargs)
     defaults_pos = list(func_def.args.defaults)
@@ -194,7 +194,7 @@ def _parse_signature_block(body: str) -> Tuple[str, Dict[str, str]] | None:
     return name, kwargs
 
 
-def _extract_doc_signatures() -> Dict[str, Dict[str, str]]:
+def _extract_doc_signatures() -> dict[str, dict[str, str]]:
     """Parse API.md, return ``{function_name: {kwarg: default_literal}}``.
 
     A function with multiple code blocks (e.g. shown once as a signature
@@ -203,7 +203,7 @@ def _extract_doc_signatures() -> Dict[str, Dict[str, str]]:
     are silently skipped.
     """
     text = API_DOC.read_text(encoding="utf-8")
-    out: Dict[str, Dict[str, str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for body in CODE_BLOCK_RE.findall(text):
         parsed = _parse_signature_block(body)
         if parsed is None:
@@ -217,7 +217,7 @@ def _extract_doc_signatures() -> Dict[str, Dict[str, str]]:
     return out
 
 
-def _live_kwargs(fn_name: str) -> Dict[str, Any]:
+def _live_kwargs(fn_name: str) -> dict[str, Any]:
     """Live ``inspect.signature`` kwargs for ``src.<fn_name>``.
 
     Returns ``{kwarg_name: default_value}`` — values are real Python objects,
@@ -225,7 +225,7 @@ def _live_kwargs(fn_name: str) -> Dict[str, Any]:
     """
     fn = getattr(src, fn_name)
     sig = inspect.signature(fn)
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for name, p in sig.parameters.items():
         if p.default is inspect.Parameter.empty:
             continue
@@ -288,7 +288,7 @@ def test_documented_kwargs_match_live_signature(fn_name: str) -> None:
     doc_kwargs = DOC_SIGS[fn_name]
     live_kwargs = _live_kwargs(fn_name)
 
-    drift: List[str] = []
+    drift: list[str] = []
     for kw, doc_default in doc_kwargs.items():
         if kw not in live_kwargs:
             drift.append(

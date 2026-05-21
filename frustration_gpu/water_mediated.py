@@ -91,7 +91,6 @@ LOC budget: ~250-400 lines of code + this docstring.
 from __future__ import annotations
 
 import warnings
-from typing import Dict, Optional
 
 import torch
 
@@ -106,7 +105,6 @@ from ._contact_common import (
 )
 from .contact_gamma import load_mediated_gamma
 
-
 # --- numerical constants (Å units except where noted) -------------------------
 # Mirror the C++ ``[Water]`` block (``fix_backbone.cpp:257-266``) and
 # ``compute_water_potential`` (``:5459-5473``).
@@ -120,11 +118,11 @@ CONTACT_MIN_SEQ_SEP: int = 2      # ``|i - j| >= 2`` from [Water]'s "2 2" line
 
 # --- public API ---------------------------------------------------------------
 def water_mediated_energy(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     *,
     rho: torch.Tensor,
-    gamma_mediated_protein: Optional[torch.Tensor] = None,
-    gamma_mediated_water: Optional[torch.Tensor] = None,
+    gamma_mediated_protein: torch.Tensor | None = None,
+    gamma_mediated_water: torch.Tensor | None = None,
     k_water: float = 1.0,
     r_min: float = MEDIATED_R_MIN_A,
     r_max: float = MEDIATED_R_MAX_A,
@@ -132,12 +130,12 @@ def water_mediated_energy(
     eta_sigma: float = MEDIATED_ETA_SIGMA,
     rho_0: float = MEDIATED_RHO_0,
     contact_min_seq_sep: int = CONTACT_MIN_SEQ_SEP,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     return_pair_matrix: bool = False,
-    _context: "Optional[ContactContext | SparseContactContext]" = None,
+    _context: ContactContext | SparseContactContext | None = None,
     sparse: bool = False,
     use_cdist: bool = False,
-) -> torch.Tensor | Dict[str, torch.Tensor]:
+) -> torch.Tensor | dict[str, torch.Tensor]:
     """Compute the AWSEM water-mediated contact energy ``V_mediated``.
 
     Parameters
@@ -436,15 +434,15 @@ def water_mediated_pair_energy(
     rho_i: float,
     rho_j: float,
     *,
-    gamma_mediated_protein: Optional[torch.Tensor] = None,
-    gamma_mediated_water: Optional[torch.Tensor] = None,
+    gamma_mediated_protein: torch.Tensor | None = None,
+    gamma_mediated_water: torch.Tensor | None = None,
     k_water: float = 1.0,
     r_min: float = MEDIATED_R_MIN_A,
     r_max: float = MEDIATED_R_MAX_A,
     eta: float = MEDIATED_ETA_PER_A,
     eta_sigma: float = MEDIATED_ETA_SIGMA,
     rho_0: float = MEDIATED_RHO_0,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
 ) -> torch.Tensor:
     """Scalar V_mediated for a single (r, aa_i, aa_j, ρ_i, ρ_j) tuple.

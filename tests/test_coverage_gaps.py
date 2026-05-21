@@ -28,7 +28,9 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu import (                                          # noqa: E402
+from _paths import PDB_DIR  # noqa: E402
+
+from frustration_gpu import (  # noqa: E402
     ContactContext,
     build_contact_context,
     chain_segments,
@@ -37,9 +39,6 @@ from frustration_gpu import (                                          # noqa: E
     density_to_dataframe,
     parse_pdb,
 )
-
-
-from _paths import PDB_DIR  # noqa: E402
 
 
 def _has_pdb(pdb_id: str) -> bool:

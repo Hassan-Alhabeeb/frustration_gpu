@@ -42,13 +42,12 @@ chains; require full backbone" defaults:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import torch
 
 # Three-letter -> one-letter, including the most common non-standard residues
 # encountered in PDB files. Anything not in here is dropped.
-THREE_TO_ONE: Dict[str, str] = {
+THREE_TO_ONE: dict[str, str] = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
     "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
     "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
@@ -74,7 +73,7 @@ STANDARD_AA_3LETTERS: frozenset = frozenset({
 })
 
 # OpenAWSEM gamma_se_map_1_letter (the column order in gamma.dat / burial_gamma.dat).
-ONE_TO_IDX: Dict[str, int] = {
+ONE_TO_IDX: dict[str, int] = {
     "A": 0,  "R": 1,  "N": 2,  "D": 3,  "C": 4,
     "Q": 5,  "E": 6,  "G": 7,  "H": 8,  "I": 9,
     "L": 10, "K": 11, "M": 12, "F": 13, "P": 14,
@@ -98,7 +97,7 @@ def _parse_atom_record(
     *,
     keep_altloc_b: bool = False,
     include_dna: bool = False,
-) -> Optional[dict]:
+) -> dict | None:
     """Parse an ATOM/HETATM line into a dict, or return None if unusable.
 
     Parameters
@@ -178,13 +177,13 @@ def _parse_atom_record(
 def parse_pdb(
     pdb_path: str | Path,
     *,
-    chains: Optional[List[str]] = None,
+    chains: list[str] | None = None,
     device: str | torch.device = "cpu",
     dtype: torch.dtype = torch.float32,
     keep_incomplete_backbone: bool = False,
     include_dna: bool = False,
     lammps_compat_altloc: bool = False,
-) -> Dict[str, torch.Tensor | list]:
+) -> dict[str, torch.Tensor | list]:
     """Parse a PDB file into PyTorch tensors.
 
     Parameters
@@ -287,8 +286,8 @@ def parse_pdb(
     # collect atoms grouped by (chain, resnum, icode, altloc) preserving
     # file order. When lammps_compat_altloc=True we keep altloc-A and B
     # in SEPARATE groups so we can insert the altloc-B as a shadow.
-    residues: List[dict] = []
-    res_index: Dict[tuple, int] = {}
+    residues: list[dict] = []
+    res_index: dict[tuple, int] = {}
     # Track every chain ID observed (across atom records that map to a
     # standard / mapped residue) so we can produce a helpful error if a
     # caller-supplied ``chains`` filter excludes everything.
@@ -377,7 +376,7 @@ def parse_pdb(
     # their canonical AA (SEC -> C, MSE -> M, HID/HIE/HIP -> H, etc.). This
     # makes the implicit substitution visible to users who would otherwise
     # be surprised by the gamma-table identity used downstream.
-    nonstandard_seen: Dict[str, str] = {}
+    nonstandard_seen: dict[str, str] = {}
     for r in residues:
         if r["is_dna"]:
             continue
@@ -408,8 +407,8 @@ def parse_pdb(
     is_gly = torch.zeros(n_res, dtype=torch.bool)
     is_dna = torch.zeros(n_res, dtype=torch.bool)
     is_altb = torch.zeros(n_res, dtype=torch.bool)
-    chain_ids: List[str] = []
-    icodes: List[str] = []
+    chain_ids: list[str] = []
+    icodes: list[str] = []
 
     for i, r in enumerate(residues):
         a = r["atoms"]
@@ -471,10 +470,10 @@ def parse_pdb(
 
 
 def _build_lammps_emit_rows(
-    residues: List[dict],
+    residues: list[dict],
     is_dna: torch.Tensor,
     is_altb: torch.Tensor,
-) -> List[tuple]:
+) -> list[tuple]:
     """Build the 5adens-emission row list that reproduces frustratometeR's
     LAMMPS-compatible output pattern (a zip over equivalences and the
     file-order CA list, where altloc-B CAs are inserted in-line in the
@@ -517,19 +516,19 @@ def _build_lammps_emit_rows(
     orchestrator caps the emission at ``N_protein`` (matching the zip
     truncation behaviour in frustratometeR's source).
     """
-    rows: List[tuple] = []
+    rows: list[tuple] = []
     math_idx = 0
     eq_idx = 0
     # Pre-build the eq list — a unique (chain, resnum) per protein /
     # DNA residue in PDB-file order (skip altloc-B shadows).
-    eq_list: List[tuple] = []
+    eq_list: list[tuple] = []
     for i, r in enumerate(residues):
         is_altb_i = bool(is_altb[i].item())
         if is_altb_i:
             continue
         eq_list.append((r["chain"], r["resnum"]))
     n_eq = len(eq_list)
-    for i, r in enumerate(residues):
+    for i in range(len(residues)):
         is_dna_i = bool(is_dna[i].item())
         is_altb_i = bool(is_altb[i].item())
         # Cap eq_idx defensively — past the end means "fall off the zip"
@@ -566,7 +565,7 @@ def _build_lammps_emit_rows(
     return rows
 
 
-def _inherit_backbone_to_altloc_b(residues: List[dict]) -> None:
+def _inherit_backbone_to_altloc_b(residues: list[dict]) -> None:
     """For each altloc-B residue, fill any missing N/CA/C/O/CB atom from
     its matching altloc-A counterpart.
 
@@ -577,7 +576,7 @@ def _inherit_backbone_to_altloc_b(residues: List[dict]) -> None:
     B shadow (PDB altloc-B records typically omit the shared N/C/O).
     """
     # Build a map of altloc-A residues for O(1) lookup. Mutates in place.
-    a_lookup: Dict[tuple, dict] = {}
+    a_lookup: dict[tuple, dict] = {}
     for r in residues:
         if r["altloc_key"] == "A":
             a_lookup[(r["chain"], r["resnum"], r["icode"])] = r
@@ -594,7 +593,7 @@ def _inherit_backbone_to_altloc_b(residues: List[dict]) -> None:
                 r["atoms"][atom_name] = a["atoms"][atom_name]
 
 
-def _weave_altloc_b_shadows(residues: List[dict]) -> List[dict]:
+def _weave_altloc_b_shadows(residues: list[dict]) -> list[dict]:
     """Re-order residues so each altloc-B group is inserted right after its
     matching altloc-A group.
 
@@ -611,8 +610,8 @@ def _weave_altloc_b_shadows(residues: List[dict]) -> List[dict]:
     If no matching A is found, the B residue stays in its original
     position (defensive: shouldn't happen on well-formed PDBs).
     """
-    a_index: Dict[tuple, int] = {}
-    out: List[dict] = []
+    a_index: dict[tuple, int] = {}
+    out: list[dict] = []
     for r in residues:
         if r["altloc_key"] == "A":
             a_index[(r["chain"], r["resnum"], r["icode"])] = len(out)
@@ -621,7 +620,7 @@ def _weave_altloc_b_shadows(residues: List[dict]) -> List[dict]:
     # Now insert B residues right after their matching A entry. Walk in
     # the original order to preserve B-after-B ordering for residues
     # carrying multiple altlocs (rare but possible).
-    inserts: List[tuple] = []  # (insert_after_idx_in_out, b_residue)
+    inserts: list[tuple] = []  # (insert_after_idx_in_out, b_residue)
     for r in residues:
         if r["altloc_key"] != "B":
             continue
@@ -643,7 +642,7 @@ def _weave_altloc_b_shadows(residues: List[dict]) -> List[dict]:
     return out
 
 
-def chain_segments(chain_ids: List[str]) -> List[tuple]:
+def chain_segments(chain_ids: list[str]) -> list[tuple]:
     """Return a list of (start, end) index ranges per chain (end exclusive).
 
     Used by the burial and contact terms to forbid cross-chain ``rho`` neighbours

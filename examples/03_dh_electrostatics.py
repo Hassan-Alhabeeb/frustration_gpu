@@ -54,7 +54,7 @@ def main() -> None:
     only_off = set_off - set_on
     only_on = set_on - set_off
 
-    print(f"\nTop-10 highly-frustrated pairs:")
+    print("\nTop-10 highly-frustrated pairs:")
     print(f"  Shared by both runs:    {len(shared):>2d}")
     print(f"  Unique to DH-off run:   {len(only_off):>2d}")
     print(f"  Unique to DH-on run:    {len(only_on):>2d}")

@@ -35,12 +35,13 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.mutational_decoys import (                                       # noqa: E402
+from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
+
+from frustration_gpu.mutational_decoys import (  # noqa: E402
     mutational_decoy_stats,
 )
-from frustration_gpu.parser import parse_pdb                                          # noqa: E402
+from frustration_gpu.parser import parse_pdb  # noqa: E402
 
-from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
 DUMP_DIR = DUMP_ROOT / "mutational"
 
 

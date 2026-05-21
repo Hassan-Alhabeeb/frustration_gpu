@@ -30,8 +30,6 @@ preferred for numerical match.
 """
 from __future__ import annotations
 
-from typing import Dict
-
 import torch
 
 # Trans coefficients (default for all residues except IPR cis-proline).
@@ -49,10 +47,10 @@ _CIS_PRO = {
 
 
 def compute_virtual_atoms(
-    parsed: Dict[str, torch.Tensor | list],
+    parsed: dict[str, torch.Tensor | list],
     *,
     use_cis_proline: bool = False,
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Compute virtual N / H / C positions from CA and O.
 
     Parameters

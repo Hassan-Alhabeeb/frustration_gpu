@@ -33,16 +33,17 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.burial import burial_density                                # noqa: E402
-from frustration_gpu.contact_gamma import load_mediated_gamma                    # noqa: E402
-from frustration_gpu.direct_contact import direct_contact_energy                 # noqa: E402
-from frustration_gpu.parser import parse_pdb                                     # noqa: E402
-from frustration_gpu.water_mediated import (                                     # noqa: E402
+from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
+
+from frustration_gpu.burial import burial_density  # noqa: E402
+from frustration_gpu.contact_gamma import load_mediated_gamma  # noqa: E402
+from frustration_gpu.direct_contact import direct_contact_energy  # noqa: E402
+from frustration_gpu.parser import parse_pdb  # noqa: E402
+from frustration_gpu.water_mediated import (  # noqa: E402
     water_mediated_energy,
     water_mediated_pair_energy,
 )
 
-from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
 ENERGY_LOG_DIR = DUMP_ROOT / "configurational"
 
 # Targets from energy.log "Water" column at step 0
@@ -215,7 +216,7 @@ def test_boundary_continuity():
     assert abs(vals[0]) < 1e-4, f"V at r=3.0 should be ~0, got {vals[0]}"
     assert abs(vals[-1]) < 1e-4, f"V at r=12.0 should be ~0, got {vals[-1]}"
     # In-window: non-zero
-    assert abs(vals[4]) > 1e-3, f"V at r=8.0 (mid window) should be non-zero"
+    assert abs(vals[4]) > 1e-3, "V at r=8.0 (mid window) should be non-zero"
     # Monotonic increase to mid then decrease — check no jumps
     for k in range(len(vals) - 1):
         # Smooth: small ratio of consecutive differences (no discontinuity)

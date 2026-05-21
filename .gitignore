@@ -59,8 +59,8 @@ benchmark/*.npz
 benchmark/_*
 
 # Scratch / spike files at repo root
-_*.py
-_*.json
+/_*.py
+/_*.json
 _spike_*/
 _inspect_*/
 

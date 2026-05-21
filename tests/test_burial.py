@@ -31,11 +31,11 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.burial import burial_density, burial_energy   # noqa: E402
-from frustration_gpu.parser import parse_pdb                        # noqa: E402
-from frustration_gpu.virtual_atoms import compute_virtual_atoms     # noqa: E402
-
 from _paths import PDB_DIR  # noqa: E402
+
+from frustration_gpu.burial import burial_density, burial_energy  # noqa: E402
+from frustration_gpu.parser import parse_pdb  # noqa: E402
+from frustration_gpu.virtual_atoms import compute_virtual_atoms  # noqa: E402
 
 
 def _has_pdb(pdb_id: str) -> bool:
@@ -177,13 +177,18 @@ def test_rho_cpu_gpu_agreement():
     assert delta < 1e-8, f"CPU vs GPU rho disagree by {delta}"
 
 
-@pytest.mark.skipif(not _has_pdb("5AON"), reason="5AON.pdb not available")
+_FRUSTRAPY_CACHE = Path("F:/research_plan/allosteric/features/frustration/5AON_frust.npz")
+
+
+@pytest.mark.skipif(
+    not _FRUSTRAPY_CACHE.is_file(),
+    reason="local frustrapy cache not present (dev-machine-only sanity check)",
+)
 def test_frustrapy_cache_loadable():
-    """We don't validate burial against the cache (cache is per-residue density
-    of frustration *contacts*, not rho), but we make sure the file is parsable
-    so Phase 2 can use it for cross-checks."""
+    """Dev-only sanity check that a local frustrapy cache is still parsable.
+    Skipped on CI / any machine that doesn't have the file."""
     import numpy as np
-    cache = np.load("F:/research_plan/allosteric/features/frustration/5AON_frust.npz")
+    cache = np.load(_FRUSTRAPY_CACHE)
     assert "features" in cache.files
     assert "feature_names" in cache.files
     feats = cache["features"]

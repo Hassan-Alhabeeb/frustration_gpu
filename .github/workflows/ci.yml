@@ -57,4 +57,4 @@ jobs:
           pip install "ruff >= 0.1.0"
 
       - name: Ruff check
-        run: ruff check src tests examples
+        run: ruff check frustration_gpu tests examples

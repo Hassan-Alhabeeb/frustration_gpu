@@ -98,19 +98,16 @@ LOC budget: ~400-500 lines + this docstring.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import torch
 
 from ._contact_common import _build_chain_index, _resolve_contact_coords
-from .contact_gamma import load_direct_gamma, load_mediated_gamma
 from .decoys import (
     DEFAULT_CONTACT_CUTOFF_A,
     DEFAULT_N_DECOYS,
-    DIRECT_R_MIN_A,
     DIRECT_R_MAX_A,
-    MEDIATED_R_MIN_A,
+    DIRECT_R_MIN_A,
     MEDIATED_R_MAX_A,
+    MEDIATED_R_MIN_A,
     WATER_ETA_PER_A,
     WATER_ETA_SIGMA,
     WATER_RHO_0,
@@ -118,12 +115,10 @@ from .decoys import (
     _cached_load_direct_gamma,
     _cached_load_mediated_gamma,
     _dtype_to_str,
-    burial_switch,
     lammps_dump_rho,
     water_theta,
 )
 from .parameters import BURIAL_KAPPA, BURIAL_RHO_MAX, BURIAL_RHO_MIN
-
 
 # Same as the contact-term default (``[Water]`` line "2 2" → |i - j| >= 2).
 PAIR_MIN_SEQ_SEP: int = 2
@@ -453,7 +448,7 @@ def _burial_residue_energy(
 # ---------------------------------------------------------------------------
 
 def _enumerate_native_pairs(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     *,
     contact_cutoff: float,
     pair_min_seq_sep: int,
@@ -819,14 +814,14 @@ def _per_pair_U(
 # ---------------------------------------------------------------------------
 
 def mutational_decoy_stats(
-    coords: Dict[str, torch.Tensor],
-    rho: Optional[torch.Tensor] = None,
+    coords: dict[str, torch.Tensor],
+    rho: torch.Tensor | None = None,
     *,
     n_decoys: int = DEFAULT_N_DECOYS,
     contact_cutoff: float = DEFAULT_CONTACT_CUTOFF_A,
     pair_min_seq_sep: int = PAIR_MIN_SEQ_SEP,
     seed: int = 0,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
     k_water: float = 1.0,
     k_burial: float = 1.0,
@@ -840,7 +835,7 @@ def mutational_decoy_stats(
     burial_kappa: float = BURIAL_KAPPA,
     burial_rho_min: tuple = BURIAL_RHO_MIN,
     burial_rho_max: tuple = BURIAL_RHO_MAX,
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Compute per-pair (E_native, decoy_mean, decoy_std) for mutational mode.
 
     Output schema matches the LAMMPS ``mutational/<PDB>_tertiary_frustration.dat``

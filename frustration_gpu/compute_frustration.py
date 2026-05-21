@@ -48,7 +48,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 import torch
 
@@ -56,8 +56,6 @@ from .debye_huckel import debye_huckel_pair_energy
 from .decoys import configurational_decoy_stats, lammps_dump_rho
 from .density import compute_residue_density, emit_5adens_dat
 from .frustration import (
-    HIGHLY_FRUSTRATED_THRESHOLD,
-    MINIMALLY_FRUSTRATED_THRESHOLD,
     classify_frustration,
     compute_frustration_index,
     emit_postprocessed_pair_dat,
@@ -70,7 +68,7 @@ from .parser import ONE_TO_IDX, parse_pdb
 from .singleresidue_decoys import singleresidue_decoy_stats
 
 # Inverse mapping idx → one-letter (built from ONE_TO_IDX, length 20).
-_IDX_TO_ONE: List[str] = [""] * 20
+_IDX_TO_ONE: list[str] = [""] * 20
 for _aa, _i in ONE_TO_IDX.items():
     _IDX_TO_ONE[_i] = _aa
 
@@ -112,10 +110,10 @@ class FrustrationResult:
         decoy_mean / decoy_std (configurational only — scalars), output_dir.
     """
 
-    pair_records: Optional[Any] = None        # pandas.DataFrame
-    singleresidue_records: Optional[Any] = None
-    density_records: Optional[Any] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    pair_records: Any | None = None        # pandas.DataFrame
+    singleresidue_records: Any | None = None
+    density_records: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +127,7 @@ def _resolve_device(spec: str) -> torch.device:
     return torch.device(spec)
 
 
-def _subset_protein_only(coords_full: Dict[str, Any]) -> tuple:
+def _subset_protein_only(coords_full: dict[str, Any]) -> tuple:
     """Subset the parsed-coord dict to **protein** residues only.
 
     DNA placeholder rows (``residue_types == -1``) and altloc-B shadow
@@ -199,12 +197,12 @@ def _subset_protein_only(coords_full: Dict[str, Any]) -> tuple:
     return coords_subset, idx
 
 
-def _aa_letters(aa_idx: torch.Tensor) -> List[str]:
+def _aa_letters(aa_idx: torch.Tensor) -> list[str]:
     return [_IDX_TO_ONE[int(a)] for a in aa_idx.tolist()]
 
 
 def _configurational_native_pairs(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     rho: torch.Tensor,
     *,
     pair_min_seq_sep: int,
@@ -225,10 +223,10 @@ def _configurational_native_pairs(
     from ._contact_common import _build_chain_index, _resolve_contact_coords
     from .decoys import (
         DEFAULT_CONTACT_CUTOFF_A,
-        DIRECT_R_MIN_A,
         DIRECT_R_MAX_A,
-        MEDIATED_R_MIN_A,
+        DIRECT_R_MIN_A,
         MEDIATED_R_MAX_A,
+        MEDIATED_R_MIN_A,
         WATER_ETA_PER_A,
         WATER_ETA_SIGMA,
         WATER_RHO_0,
@@ -327,7 +325,7 @@ def _add_dh_to_e_native(
     pair_j: torch.Tensor,
     aa_native: torch.Tensor,
     r_ij: torch.Tensor,
-    chain_ids: Optional[List[str]] = None,
+    chain_ids: list[str] | None = None,
     *,
     electrostatics_k: float,
     device: torch.device,
@@ -354,7 +352,7 @@ def _add_dh_to_e_native(
     # pair (i==j) is excluded — which never appears in native pairs anyway.
     # All native pairs already pass |i - j| >= 2 (pair_min_seq_sep), so the
     # DH gate is satisfied for every native pair. We do not pre-filter here.
-    dh_l: List[float] = []
+    dh_l: list[float] = []
     for k in range(n_pair):
         v = debye_huckel_pair_energy(
             float(rij_l[k]),
@@ -369,7 +367,7 @@ def _add_dh_to_e_native(
 
 def _build_pair_dataframe(
     *,
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     pair_i: torch.Tensor,
     pair_j: torch.Tensor,
     r_ij: torch.Tensor,
@@ -399,7 +397,7 @@ def _build_pair_dataframe(
     c1 = [chain_ids[k] for k in pi_l]
     c2 = [chain_ids[k] for k in pj_l]
 
-    def _round(t: torch.Tensor) -> List[float]:
+    def _round(t: torch.Tensor) -> list[float]:
         return [round(float(v), precision) for v in t.detach().cpu().tolist()]
 
     well_names = {0: "short", 1: "water-mediated", 2: "long"}
@@ -427,7 +425,7 @@ def _build_pair_dataframe(
 
 def _build_singleresidue_dataframe(
     *,
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     rho: torch.Tensor,
     e_native: torch.Tensor,
     decoy_mean: torch.Tensor,
@@ -444,7 +442,7 @@ def _build_singleresidue_dataframe(
     chain_ids = coords["chain_ids"]
     n = int(rho.numel())
 
-    def _round(t: torch.Tensor) -> List[float]:
+    def _round(t: torch.Tensor) -> list[float]:
         return [round(float(v), precision) for v in t.detach().cpu().tolist()]
 
     return pd.DataFrame({
@@ -464,18 +462,18 @@ def _build_singleresidue_dataframe(
 # ---------------------------------------------------------------------------
 
 def compute_frustration(
-    pdb_file: Union[str, Path],
+    pdb_file: str | Path,
     *,
     mode: Literal["configurational", "mutational", "singleresidue"] = "configurational",
-    chain: Optional[Union[str, List[str]]] = None,
-    residues: Optional[Dict[str, List[int]]] = None,
-    electrostatics_k: Optional[float] = None,
+    chain: str | list[str] | None = None,
+    residues: dict[str, list[int]] | None = None,
+    electrostatics_k: float | None = None,
     include_dh_in_e_native: bool = False,
     seq_dist: int = 12,
     pair_min_seq_sep: int = PAIR_MIN_SEQ_SEP,
     n_decoys: int = 1000,
     device: str = "auto",
-    output_dir: Optional[Union[str, Path]] = None,
+    output_dir: str | Path | None = None,
     seed: int = 0,
     precision: int = 3,
     dtype: torch.dtype = torch.float64,
@@ -693,8 +691,8 @@ def compute_frustration(
     pair_df = None
     sr_df = None
     density_df = None
-    dm_scalar: Optional[float] = None
-    ds_scalar: Optional[float] = None
+    dm_scalar: float | None = None
+    ds_scalar: float | None = None
     n_pairs = 0
 
     if mode == "configurational":
@@ -980,7 +978,7 @@ def compute_frustration(
         torch.cuda.synchronize(dev)
     wall_ms = (time.perf_counter() - start) * 1000.0
 
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "mode": mode,
         "chain": chain,
         "residues": residues,
@@ -1013,7 +1011,7 @@ def compute_frustration(
     )
 
 
-def _density_to_df(density: Dict[str, Any]):
+def _density_to_df(density: dict[str, Any]):
     """Build the density DataFrame from the dict returned by
     :func:`compute_residue_density`."""
     import pandas as pd
@@ -1031,10 +1029,10 @@ def _density_to_df(density: Dict[str, Any]):
 
 
 def _project_density_to_lammps_emit(
-    density: Dict[str, Any],
-    coords_full: Dict[str, Any],
+    density: dict[str, Any],
+    coords_full: dict[str, Any],
     n_protein: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Re-project protein-only density onto the LAMMPS-compatible emit row
     list (which may include DNA / altloc-B shadow rows in PDB-file order).
 
@@ -1088,7 +1086,7 @@ def _emit_pair_files(
     out_dir: Path,
     basename: str,
     mode: str,
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     pair_i: torch.Tensor,
     pair_j: torch.Tensor,
     r_ij: torch.Tensor,
@@ -1098,7 +1096,7 @@ def _emit_pair_files(
     dm: torch.Tensor,
     ds: torch.Tensor,
     fi: torch.Tensor,
-    density: Dict[str, Any],
+    density: dict[str, Any],
     precision: int,
 ) -> None:
     """Write the three output files for configurational/mutational mode."""
@@ -1129,31 +1127,31 @@ def _emit_pair_files(
 
 
 def calculate_frustration(
-    pdb_file: Union[str, Path, None] = None,
+    pdb_file: str | Path | None = None,
     *,
     mode: str = "configurational",
-    chain: Optional[Union[str, List[str]]] = None,
-    residues: Optional[Dict[str, List[int]]] = None,
-    electrostatics_k: Optional[float] = None,
+    chain: str | list[str] | None = None,
+    residues: dict[str, list[int]] | None = None,
+    electrostatics_k: float | None = None,
     include_dh_in_e_native: bool = False,
     seq_dist: int = 12,
     n_decoys: int = 1000,
     device: str = "auto",
-    results_dir: Optional[Union[str, Path]] = None,
-    output_dir: Optional[Union[str, Path]] = None,
+    results_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     seed: int = 0,
     precision: int = 3,
     graphics: bool = False,
     debug: bool = False,
     pbar: bool = False,
     visualization: bool = False,
-    pdb_id: Optional[str] = None,
-    is_mutation_calculation: Optional[bool] = None,
+    pdb_id: str | None = None,
+    is_mutation_calculation: bool | None = None,
     keep_incomplete_backbone: bool = False,
     include_dna: bool = False,
     lammps_compat_altloc: bool = False,
     overwrite: bool = False,
-    n_cpus: Optional[int] = None,
+    n_cpus: int | None = None,
     **kwargs: Any,
 ) -> FrustrationResult:
     """frustrapy ``calculate_frustration`` drop-in adapter (Phase 5 P3).
@@ -1243,7 +1241,7 @@ def calculate_frustration(
     # `compute_frustration` now natively accepts str OR list[str] and
     # routes both through the parser-level filter, so we pass `chain`
     # through unchanged. QA-3 H-2 fix (2026-05-21).
-    chain_arg: Optional[Union[str, List[str]]] = chain
+    chain_arg: str | list[str] | None = chain
 
     # The pdb_id arg is accepted for API parity (frustrapy auto-downloads
     # from RCSB when only pdb_id is given). We don't auto-download.

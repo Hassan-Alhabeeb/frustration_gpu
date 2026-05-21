@@ -45,17 +45,15 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.debye_huckel import (                                       # noqa: E402
+from _paths import PDB_DIR  # noqa: E402
+
+from frustration_gpu.debye_huckel import (  # noqa: E402
     DH_CHARGES_FLOAT,
-    DH_K_QQ_DEFAULT,
-    DH_SCREENING_LENGTH_A,
     aa_charge_vector,
     debye_huckel_energy,
     debye_huckel_pair_energy,
 )
-from frustration_gpu.parser import ONE_TO_IDX, parse_pdb                         # noqa: E402
-
-from _paths import PDB_DIR  # noqa: E402
+from frustration_gpu.parser import ONE_TO_IDX, parse_pdb  # noqa: E402
 
 
 def _has_pdb(pdb_id: str) -> bool:

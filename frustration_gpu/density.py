@@ -53,7 +53,7 @@ LOC budget: ~150-250 lines + this docstring.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -73,7 +73,7 @@ DEFAULT_DENSITY_RATIO_A: float = 5.0
 
 def compute_residue_density(
     *,
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     pair_i: torch.Tensor,
     pair_j: torch.Tensor,
     fi: torch.Tensor,
@@ -82,7 +82,7 @@ def compute_residue_density(
         HIGHLY_FRUSTRATED_THRESHOLD,
         MINIMALLY_FRUSTRATED_THRESHOLD,
     ),
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Aggregate native-pair FI into per-residue density counts.
 
     For each residue ``i``, count how many native-pair midpoints lie
@@ -143,12 +143,10 @@ def compute_residue_density(
 
     # Match the LAMMPS dump's coordinate choice: CB for non-Gly, CA for Gly.
     xb = _xb_coords(coords).to(dtype=dtype)                         # (N, 3)
-    n = xb.shape[0]
 
     pair_i = pair_i.to(device=device, dtype=torch.int64)
     pair_j = pair_j.to(device=device, dtype=torch.int64)
     fi = fi.to(device=device, dtype=dtype)
-    n_pair = int(pair_i.numel())
 
     # Per-pair midpoint (between the dump's xi/yi/zi and xj/yj/zj).
     midpoints = 0.5 * (xb[pair_i] + xb[pair_j])                     # (N_pair, 3)
@@ -204,7 +202,7 @@ def compute_residue_density(
     }
 
 
-def density_to_dataframe(density: Dict[str, torch.Tensor]) -> "pd.DataFrame":
+def density_to_dataframe(density: dict[str, torch.Tensor]) -> pd.DataFrame:
     """Convert the dict returned by :func:`compute_residue_density` to a
     pandas DataFrame matching the ``<PDB>_5adens.dat`` column order.
 
@@ -228,8 +226,8 @@ def density_to_dataframe(density: Dict[str, torch.Tensor]) -> "pd.DataFrame":
 
 def emit_5adens_dat(
     *,
-    density: Dict[str, torch.Tensor],
-    output_path: Union[str, Path],
+    density: dict[str, torch.Tensor],
+    output_path: str | Path,
 ) -> None:
     """Write the dict from :func:`compute_residue_density` to a
     ``<PDB>_5adens.dat`` text file matching the frustratometeR schema.
@@ -258,7 +256,7 @@ def emit_5adens_dat(
         "Res ChainRes Total nHighlyFrst nNeutrallyFrst nMinimallyFrst "
         "relHighlyFrustrated relNeutralFrustrated relMinimallyFrustrated"
     )
-    lines: List[str] = [header]
+    lines: list[str] = [header]
     n = len(res)
     for k in range(n):
         lines.append(

@@ -119,11 +119,15 @@ LOC budget: ~400 lines + this docstring.
 from __future__ import annotations
 
 import functools
-from typing import Dict, Optional
 
 import torch
 
-from .burial import burial_energy, compute_rho
+from ._contact_common import (
+    ContactContext,
+    _build_chain_index,
+    _resolve_contact_coords,
+)
+from .burial import compute_rho
 from .contact_gamma import load_direct_gamma, load_mediated_gamma
 from .parameters import (
     BURIAL_KAPPA,
@@ -131,12 +135,6 @@ from .parameters import (
     BURIAL_RHO_MIN,
     load_burial_gamma,
 )
-from ._contact_common import (
-    ContactContext,
-    _build_chain_index,
-    _resolve_contact_coords,
-)
-
 
 # --- LAMMPS-dump-compatible rho -----------------------------------------------
 # The LAMMPS-AWSEM tertiary_frustration.dat dump uses a rho value that is
@@ -194,10 +192,10 @@ def _dtype_to_str(dtype: torch.dtype) -> str:
 
 # --- LAMMPS-dump-compatible rho helper ---------------------------------------
 def lammps_dump_rho(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     *,
     min_seq_sep: int = LAMMPS_DUMP_RHO_MIN_SEQ_SEP,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
 ) -> torch.Tensor:
     """Compute the per-residue rho that LAMMPS-AWSEM writes to
     ``tertiary_frustration.dat`` and uses internally in
@@ -284,16 +282,16 @@ def burial_switch(
 
 # --- main sampler -------------------------------------------------------------
 def sample_configurational_decoys(
-    coords: Dict[str, torch.Tensor],
+    coords: dict[str, torch.Tensor],
     rho: torch.Tensor,
     *,
     n_decoys: int = DEFAULT_N_DECOYS,
     contact_cutoff: float = DEFAULT_CONTACT_CUTOFF_A,
     seed: int = 0,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     max_resample_iter: int = 64,
-    _context: Optional[ContactContext] = None,
-) -> Dict[str, torch.Tensor]:
+    _context: ContactContext | None = None,
+) -> dict[str, torch.Tensor]:
     """Sample ``n_decoys`` configurational decoys for the protein.
 
     The five outputs are independent draws from the structure's residue
@@ -461,12 +459,12 @@ def sample_configurational_decoys(
 
 # --- decoy energy computation -------------------------------------------------
 def compute_configurational_decoy_energy(
-    decoys: Dict[str, torch.Tensor],
+    decoys: dict[str, torch.Tensor],
     *,
-    gamma_direct: Optional[torch.Tensor] = None,
-    gamma_mediated_protein: Optional[torch.Tensor] = None,
-    gamma_mediated_water: Optional[torch.Tensor] = None,
-    burial_gamma: Optional[torch.Tensor] = None,
+    gamma_direct: torch.Tensor | None = None,
+    gamma_mediated_protein: torch.Tensor | None = None,
+    gamma_mediated_water: torch.Tensor | None = None,
+    burial_gamma: torch.Tensor | None = None,
     k_water: float = 1.0,
     k_burial: float = 1.0,
     eta: float = WATER_ETA_PER_A,
@@ -479,9 +477,9 @@ def compute_configurational_decoy_energy(
     burial_kappa: float = BURIAL_KAPPA,
     burial_rho_min: tuple = BURIAL_RHO_MIN,
     burial_rho_max: tuple = BURIAL_RHO_MAX,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Compute the per-decoy energy ``E_decoy = V_water + V_burial_i + V_burial_j``.
 
     Matches ``FixBackbone::compute_decoy_ixns`` line 5331::
@@ -656,16 +654,16 @@ def compute_configurational_decoy_energy(
 
 # --- thin convenience wrapper -------------------------------------------------
 def configurational_decoy_stats(
-    coords: Dict[str, torch.Tensor],
-    rho: Optional[torch.Tensor] = None,
+    coords: dict[str, torch.Tensor],
+    rho: torch.Tensor | None = None,
     *,
     n_decoys: int = DEFAULT_N_DECOYS,
     contact_cutoff: float = DEFAULT_CONTACT_CUTOFF_A,
     min_seq_sep_rho: int = LAMMPS_DUMP_RHO_MIN_SEQ_SEP,
     seed: int = 0,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     dtype: torch.dtype = torch.float64,
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """One-stop: sample + compute. Returns the stats + the raw decoys.
 
     Parameters

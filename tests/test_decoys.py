@@ -40,8 +40,9 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from frustration_gpu.decoys import (                                                # noqa: E402
-    LAMMPS_DUMP_RHO_MIN_SEQ_SEP,
+from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
+
+from frustration_gpu.decoys import (  # noqa: E402
     _cached_load_mediated_gamma,
     burial_switch,
     compute_configurational_decoy_energy,
@@ -50,11 +51,9 @@ from frustration_gpu.decoys import (                                            
     sample_configurational_decoys,
     water_theta,
 )
-from frustration_gpu.parser import parse_pdb                                        # noqa: E402
-from frustration_gpu.water_mediated import water_mediated_energy                    # noqa: E402
+from frustration_gpu.parser import parse_pdb  # noqa: E402
+from frustration_gpu.water_mediated import water_mediated_energy  # noqa: E402
 
-
-from _paths import DUMP_ROOT, PDB_DIR  # noqa: E402
 DUMP_DIR = DUMP_ROOT / "configurational"
 
 # (decoy_mean, decoy_std) targets from `tertiary_frustration.dat` (configurational mode)
