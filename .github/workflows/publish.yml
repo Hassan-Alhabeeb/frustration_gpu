@@ -59,3 +59,8 @@ jobs:
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Be idempotent: if the version is already on PyPI (e.g. the tag-push
+          # workflow already published it before this release-published workflow
+          # fires), skip the upload silently instead of failing the run.
+          skip-existing: true
