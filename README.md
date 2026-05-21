@@ -23,7 +23,7 @@ This package re-derives the AWSEM Hamiltonian (water + burial + Debye-Huckel) an
 
 ## Benchmarks (Phase 5, 20-PDB panel)
 
-Hardware: single RTX 4070 (12 GB) + Windows 11 host, PyTorch 2.6.0+cu124. Frustrapy runs on a 32-core EPYC VM (`root@10.1.0.45`), single-PDB single-threaded, the apples-to-apples comparison that frustrapy users experience.
+Hardware: AMD Ryzen 9 5900X + RTX 4070 (12 GB), Windows 11 host, PyTorch 2.6.0+cu124. Frustrapy runs on a 32-core EPYC VM (`root@10.1.0.45`), single-PDB single-threaded, the apples-to-apples comparison that frustrapy users experience.
 
 ### Head-to-head vs frustrapy CPU (4 PDBs x 3 modes)
 
@@ -46,7 +46,7 @@ Configurational mode is already fast in frustrapy (one scalar decoy ensemble), s
 
 Geometric-mean speedup across the 12 head-to-head runs: 17.0x (median 14.3x).
 
-> **Hardware comparison footnote.** Our timings come from a Windows 11 host with an Intel CPU plus an RTX 4070 (12 GB). frustrapy timings come from a Linux EPYC VM (32 cores allocated, no GPU). Both runs use single-threaded execution and identical kwargs (`n_decoys=1000`, `seq_dist=12`, `electrostatics_k=None`). The CPU-vs-CPU column is therefore biased by hardware mismatch and is not directly comparable; the headline GPU-vs-CPU comparison (our RTX 4070 vs frustrapy on EPYC CPU) is fair as a real-world deployment comparison: both numbers reflect what users on the typical hardware see.
+> **Hardware comparison footnote.** Our timings come from a Windows 11 host with an AMD Ryzen 9 5900X plus an RTX 4070 (12 GB). frustrapy timings come from a Linux EPYC VM (32 cores allocated, no GPU). Both runs use single-threaded execution and identical kwargs (`n_decoys=1000`, `seq_dist=12`, `electrostatics_k=None`). The CPU-vs-CPU column is therefore biased by hardware mismatch and is not directly comparable; the headline GPU-vs-CPU comparison (our RTX 4070 vs frustrapy on EPYC CPU) is fair as a real-world deployment comparison: both numbers reflect what users on the typical hardware see.
 
 Raw numbers: `benchmark/phase5_panel_results.csv`, `benchmark/phase5_frustrapy_comparison.csv`. Full writeup: `benchmark/phase5_results.md`.
 

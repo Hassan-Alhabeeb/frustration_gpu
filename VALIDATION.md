@@ -102,7 +102,7 @@ The 3% noise floor is what causes the residual ~2-3% gap on classification label
 
 ## 6. Performance vs frustrapy
 
-Hardware: single **RTX 4070 (12 GB)** + Windows 11 host, PyTorch 2.6.0+cu124. Frustrapy on EPYC VM `root@10.1.0.45` (32 cores, no GPU), single-PDB single-threaded.
+Hardware: **AMD Ryzen 9 5900X + RTX 4070 (12 GB)**, Windows 11 host, PyTorch 2.6.0+cu124. Frustrapy on EPYC VM `root@10.1.0.45` (32 cores, no GPU), single-PDB single-threaded.
 
 | PDB | N res | mode | frustrapy CPU (s) | ours CPU (s) | ours GPU (ms) | GPU speedup vs frustrapy |
 |---|---|---|---|---|---|---|
@@ -143,7 +143,7 @@ External Spearman validation is not available at this size (no LAMMPS reference 
 
 Full 20-PDB panel results: `benchmark/phase5_panel_results.csv`. Frustrapy head-to-head: `benchmark/phase5_frustrapy_comparison.csv`.
 
-> **Hardware comparison footnote.** Our timings come from a Windows 11 host with an Intel CPU plus an RTX 4070 (12 GB). frustrapy timings come from a Linux EPYC VM (32 cores allocated, no GPU). Both runs use single-threaded execution and identical kwargs (`n_decoys=1000`, `seq_dist=12`, `electrostatics_k=None`). The CPU-vs-CPU column is therefore biased by hardware mismatch and is not directly comparable; the headline GPU-vs-CPU comparison (our RTX 4070 vs frustrapy on EPYC CPU) is fair as a real-world deployment comparison, both numbers reflect what users on the typical hardware see.
+> **Hardware comparison footnote.** Our timings come from a Windows 11 host with an AMD Ryzen 9 5900X plus an RTX 4070 (12 GB). frustrapy timings come from a Linux EPYC VM (32 cores allocated, no GPU). Both runs use single-threaded execution and identical kwargs (`n_decoys=1000`, `seq_dist=12`, `electrostatics_k=None`). The CPU-vs-CPU column is therefore biased by hardware mismatch and is not directly comparable; the headline GPU-vs-CPU comparison (our RTX 4070 vs frustrapy on EPYC CPU) is fair as a real-world deployment comparison, both numbers reflect what users on the typical hardware see.
 
 ## 7. Caveats
 
