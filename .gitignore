@@ -76,3 +76,4 @@ results/*.html
 # OS files
 *.log
 *.tmp
+RELEASING.md
