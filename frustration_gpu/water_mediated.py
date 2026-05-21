@@ -95,13 +95,18 @@ import warnings
 import torch
 
 from ._contact_common import (
+    MEDIATED_SPARSE_MIN_SAFE_A,
     ContactContext,
     SparseContactContext,
     _build_chain_index,
     _check_no_dna_sentinel,
+    _check_residue_types_in_range,
     _pair_mask,
     _pairwise_distance_safe,
     _resolve_contact_coords,
+    _validate_context_device,
+    _validate_context_fingerprint,
+    _warn_sparse_cutoff,
 )
 from .contact_gamma import load_mediated_gamma
 
@@ -217,6 +222,8 @@ def water_mediated_energy(
     """
     # --- DNA-sentinel guard (QA-1 HIGH) -----------------------------------
     _check_no_dna_sentinel(coords["residue_types"])
+    # Finding #39 — also reject out-of-range positives.
+    _check_residue_types_in_range(coords["residue_types"])
 
     # --- resolve device + coords ------------------------------------------
     ca = coords["ca_coords"]
@@ -226,6 +233,7 @@ def water_mediated_energy(
         device = torch.device(device)
 
     # Opt sprint Idea 3 + Speed-3 Idea 1: dense or sparse context support.
+    # Finding #31 — reject cross-type _context with a clear ValueError.
     is_sparse_ctx = isinstance(_context, SparseContactContext)
     if sparse and not is_sparse_ctx:
         raise ValueError(
@@ -238,6 +246,18 @@ def water_mediated_energy(
         )
 
     if _context is not None:
+        # Finding #11 — device-mismatch validation.
+        _validate_context_device(_context, device)
+        # Finding #30 — stale-context guard.
+        _validate_context_fingerprint(_context, coords)
+        # Finding #29 — warn when sparse_cutoff is below the water-mediated
+        # safe minimum (14 Å). Dropped tail is material here.
+        if is_sparse_ctx:
+            _warn_sparse_cutoff(
+                "water_mediated_energy",
+                _context,
+                MEDIATED_SPARSE_MIN_SAFE_A,
+            )
         cb_or_ca = _context.cb_or_ca
         dtype = _context.dtype
         n = _context.n
@@ -357,16 +377,25 @@ def water_mediated_energy(
         pair_energy_upper[pair_i, pair_j] = pair_energy_1d
         pair_mask_full = torch.zeros((n, n), dtype=torch.bool, device=device)
         pair_mask_full[pair_i, pair_j] = pair_mask_sep
-        # theta/sigma/gamma diagnostics stay 1-D in sparse mode — see docstring.
-        theta_1d = 0.25 * (
+        # Finding #6 — mask theta on excluded pairs so the diagnostic
+        # doesn't show nonzero values for pairs that did not contribute.
+        # On the sparse path the theta is already only computed over
+        # in-cutoff pairs; we additionally zero out seq-sep-excluded ones.
+        theta_1d_raw = 0.25 * (
             (1.0 + torch.tanh(eta_t * (r_pair - r_min_t)))
             * (1.0 + torch.tanh(eta_t * (r_max_t - r_pair)))
         )
+        theta_1d = torch.where(
+            pair_mask_sep, theta_1d_raw, torch.zeros_like(theta_1d_raw)
+        )
+        # Finding #42 — sparse context no longer caches dense distances.
+        # Fall back to the 1-D per-pair distances; callers wanting the full
+        # symmetric matrix should use the dense path.
         return {
             "energy": total,
             "pair_energy": pair_energy_upper,
             "pair_mask": pair_mask_full,
-            "distances": ctx.dist,
+            "distances": ctx.dist if ctx.dist is not None else r_pair,
             "theta": theta_1d,
             "sigma_wat": sigma_wat_1d,
             "sigma_prot": sigma_prot_1d,
@@ -410,11 +439,19 @@ def water_mediated_energy(
 
     if not return_pair_matrix:
         return total
-    # Reconstruct theta for the diagnostic return (matches pre-fusion semantics).
-    theta = 0.25 * (
+    # Finding #6 — the diagnostic ``theta`` is reconstructed from
+    # ``safe_dist``, which has masked-out / NaN pair positions filled with
+    # the mid-window value. That filled distance evaluates to ``theta ≈ 1``
+    # (the peak of the sigmoid window), so callers inspecting ``theta``
+    # would see misleadingly large entries for cross-chain / seq-skipped /
+    # NaN-row pairs that never contributed to the energy. Mask the
+    # diagnostic with the same ``mask`` used for the energy reduction so
+    # the user sees a faithful picture: theta == 0 on excluded pairs.
+    theta_raw = 0.25 * (
         (1.0 + torch.tanh(eta_t * (safe_dist - r_min_t)))
         * (1.0 + torch.tanh(eta_t * (r_max_t - safe_dist)))
     )
+    theta = torch.where(mask, theta_raw, torch.zeros_like(theta_raw))
     return {
         "energy": total,
         "pair_energy": pair_energy_upper,
@@ -450,14 +487,52 @@ def water_mediated_pair_energy(
     Used by tests for the per-pair hand-check. Mirrors
     :func:`src.direct_contact.direct_pair_energy`. No sequence-separation logic.
 
+    Findings #39 / #57 — validate inputs:
+    * ``aa_i, aa_j`` must lie in ``[0, 20)``.
+    * Custom ``gamma_mediated_protein`` / ``gamma_mediated_water`` (if
+      supplied) must have shape ``(20, 20)``.
+    * ``r_ij`` must be finite and non-negative.
+
     Returns a 0-d tensor in kcal/mol.
     """
+    if not (0 <= int(aa_i) < 20):
+        raise ValueError(
+            f"aa_i must lie in [0, 20), got {int(aa_i)}."
+        )
+    if not (0 <= int(aa_j) < 20):
+        raise ValueError(
+            f"aa_j must lie in [0, 20), got {int(aa_j)}."
+        )
     if gamma_mediated_protein is None or gamma_mediated_water is None:
         g_p_default, g_w_default = load_mediated_gamma(device=device, dtype=dtype)
         if gamma_mediated_protein is None:
             gamma_mediated_protein = g_p_default
         if gamma_mediated_water is None:
             gamma_mediated_water = g_w_default
+    # Finding #57 — validate shape on any custom table BEFORE indexing.
+    if tuple(gamma_mediated_protein.shape) != (20, 20):
+        raise ValueError(
+            f"gamma_mediated_protein must have shape (20, 20), got "
+            f"{tuple(gamma_mediated_protein.shape)}."
+        )
+    if tuple(gamma_mediated_water.shape) != (20, 20):
+        raise ValueError(
+            f"gamma_mediated_water must have shape (20, 20), got "
+            f"{tuple(gamma_mediated_water.shape)}."
+        )
+    # Finding #57 (audit-fix follow-up) — also reject NaN/inf values.
+    # A NaN-filled gamma table previously passed shape validation and
+    # silently propagated NaN through every downstream energy.
+    if not bool(torch.isfinite(gamma_mediated_protein).all()):
+        raise ValueError(
+            "gamma_mediated_protein contains non-finite values (NaN or inf). "
+            "Silent NaN propagation would poison every dependent energy."
+        )
+    if not bool(torch.isfinite(gamma_mediated_water).all()):
+        raise ValueError(
+            "gamma_mediated_water contains non-finite values (NaN or inf). "
+            "Silent NaN propagation would poison every dependent energy."
+        )
     gamma_mediated_protein = gamma_mediated_protein.to(dtype=dtype)
     gamma_mediated_water = gamma_mediated_water.to(dtype=dtype)
     if device is not None:
@@ -466,6 +541,11 @@ def water_mediated_pair_energy(
     dev = gamma_mediated_protein.device
 
     r = torch.as_tensor(r_ij, dtype=dtype, device=dev)
+    # Finding #57/#58 — validate r_ij is finite and non-negative.
+    if not bool(torch.isfinite(r).all()):
+        raise ValueError(f"r_ij must be finite, got {float(r):g}")
+    if float(r) < 0.0:
+        raise ValueError(f"r_ij must be non-negative, got {float(r):g}")
     eta_t = torch.as_tensor(eta, dtype=dtype, device=dev)
     r_min_t = torch.as_tensor(r_min, dtype=dtype, device=dev)
     r_max_t = torch.as_tensor(r_max, dtype=dtype, device=dev)

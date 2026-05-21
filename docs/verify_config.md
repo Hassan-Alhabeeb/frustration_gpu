@@ -1,5 +1,19 @@
 # VERIFY-CONFIG: configurational mode end-to-end audit
 
+> **Historical snapshot — 2026-05-21.** This document is a one-shot
+> READ-ONLY audit taken at the date stamped below. A handful of
+> "LOW" findings here have since been addressed in the same release
+> cycle:
+>
+> * `overwrite` and `n_cpus` are now accepted (as no-op kwargs) by
+>   the `calculate_frustration` adapter — the "gap" cell in the
+>   table below is therefore obsolete.
+> * The package was renamed from `src` to `frustration_gpu`; all
+>   `src/...` line citations now live at `frustration_gpu/...`.
+>
+> For the current authoritative API contract see [API.md](API.md).
+> For the running changelog see [`CHANGELOG.md`](../CHANGELOG.md).
+
 Date: 2026-05-21. READ-ONLY audit, no source changes. Pytest baseline: 223 passing
 (see `tests/`). Hardware: RTX 4070 + Windows 11. n_decoys=1000, seed=0, float64.
 

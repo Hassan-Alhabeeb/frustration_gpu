@@ -2,11 +2,13 @@
 
 Extracts CA / N / O / CB coordinates, residue identity and chain assignment
 from a PDB file, mapping non-standard residues to their canonical AA where
-possible (e.g. MSE -> MET, SEC -> CYS). HETATM lines are ignored.
+possible (e.g. MSE -> MET, SEC -> CYS).
 
-The output is intentionally minimal — just what the burial / contact / decoy
-terms in LAMMPS-AWSEM need. Virtual-atom construction lives in
-`virtual_atoms.py`; this module never invents coordinates.
+HETATM records are *normally* skipped, with one exception: HETATM lines whose
+resname is a known modified amino acid (MSE / SEC / PYL / HID / HIE / HIP /
+CYX / CYM / ASH / GLH / LYN) are PROMOTED to be treated as ATOM records
+(see finding #9 in ``docs/v2_fix_parser.md``). RCSB encodes selenomethionine
+as HETATM by convention; dropping it silently mis-counts residues.
 
 AA index convention follows OpenAWSEM's ``gamma_se_map_1_letter`` (the index
 used by ``gamma.dat`` and ``burial_gamma.dat``):
@@ -16,6 +18,51 @@ used by ``gamma.dat`` and ``burial_gamma.dat``):
 
 This is NOT the same as ``se_map_3_letter`` in ``openAWSEM.py`` (that one
 indexes residue records, not gamma columns). Be careful when cross-referencing.
+
+Parser hardening fixes (2026-05-21, see ``docs/v2_fix_parser.md``)
+------------------------------------------------------------------
+This module's audit findings #9, #17, #18, #37, #38, #44, #45, #46, #53, #60,
+and #61 were addressed in this pass. The fixes that may affect public output
+on edge-case PDBs are:
+
+* **TER + same-letter restart** (#17): when a TER record is followed by ATOM
+  records sharing the same chain letter, the second segment is emitted as
+  ``"<letter>#<seg_num>"`` (e.g. ``A`` then ``A#2``) so the downstream
+  ``_build_chain_index`` treats them as distinct chains. On the 4 bundled
+  validation PDBs (5AON / 11BG / 1O3S / 3F9M) no segments repeat, so the
+  visible chain IDs are unchanged.
+* **Blank chain ID** (#38): blank chain IDs are now kept as the empty
+  string ``""`` instead of being silently coerced to ``"A"``. If a real
+  ``A`` chain also exists, this prevents a silent merge collision.
+* **Insertion codes** (#18): each ``(chain, resnum, icode)`` is a distinct
+  residue. Previously this was true at the parser level too, but the bug
+  flag here is documenting that **callers must look at ``insertion_codes``
+  to distinguish residues with the same integer ``resnum``** — they are
+  not collapsed by parse_pdb.
+* **Altloc-B-only residues** (#37): when no altloc-A record exists for a
+  ``(chain, resnum, icode)`` we now keep the altloc-B record as the
+  canonical position (in BOTH default and ``lammps_compat_altloc`` mode).
+  Previously this was silently dropped (or raised IndexError).
+* **HETATM modified AAs** (#9): HETATM lines whose resname is one of
+  ``MSE / SEC / PYL / HID / HIE / HIP / CYX / CYM / ASH / GLH / LYN``
+  are now accepted exactly as the equivalent ATOM line would be.
+* **First-coord-wins → highest-occupancy-wins** (#44): when multiple
+  ``ATOM`` lines have the same atom name within a residue (rare; usually
+  the altloc handling catches this), we now pick the one with the highest
+  occupancy instead of the first encountered.
+* **END terminator** (#45): coordinate parsing stops at the first ``END``
+  record (in addition to the existing ``ENDMDL`` stop).
+* **Non-finite coordinates** (#46): atoms whose x/y/z parse to NaN or
+  Inf are rejected at the line level.
+* **Mixed resname collision** (#53): if two ATOM lines for the same
+  ``(chain, resnum, icode)`` have different resnames (e.g. ALA + GLY),
+  the parser now raises ``ValueError``. Microheterogeneous residues
+  must be expressed via altloc.
+* **MODEL without ENDMDL** (#60): if a second ``MODEL`` record appears
+  with no preceding ``ENDMDL``, parsing stops at that second ``MODEL``.
+* **OXT-only terminal residues** (#61): terminal residues that supply an
+  ``OXT`` atom but no ``O`` atom now have ``OXT`` promoted to the
+  ``O`` slot so the strict backbone filter accepts them.
 
 LAMMPS-compatibility flags (2026-05-20 fix pass)
 ------------------------------------------------
@@ -83,8 +130,26 @@ ONE_TO_IDX: dict[str, int] = {
 # DNA residue 3-letter codes — used by the opt-in `include_dna` flag.
 DNA_RESNAMES: tuple = ("DA", "DT", "DC", "DG", "A", "T", "C", "G", "U", "DU")
 
+# 3-letter codes for modified amino acids that RCSB / many older deposits
+# encode as ``HETATM`` records rather than ``ATOM``. Finding #9 (2026-05-21):
+# silently dropping these can delete residues from a structure that already
+# advertised support via :data:`THREE_TO_ONE`. We promote these specific
+# HETATM resnames to be treated as ATOM lines; every other HETATM record
+# is still ignored (water, ligands, ions, ...).
+HETATM_PROMOTED_RESNAMES: frozenset = frozenset({
+    "MSE", "SEC", "PYL",
+    "HID", "HIE", "HIP",
+    "CYX", "CYM",
+    "ASH", "GLH",
+    "LYN",
+})
+
 # Atom names this module tracks.
 TRACKED_ATOMS = ("N", "CA", "C", "O", "CB")
+# Backbone atoms required by the strict ``keep_incomplete_backbone=False``
+# filter. ``OXT`` is accepted as a fallback for the carbonyl O on terminal
+# residues (#61) — see ``_parse_atom_record``.
+_OXT_FALLBACK_ATOMS = ("O",)
 # Extra atom names used when DNA inclusion is enabled (C1' is the closest
 # analogue of CA on a nucleotide; P is the closest analogue of the
 # backbone N/C carbonyl; the ′ apostrophe variations are tracked because
@@ -132,10 +197,17 @@ def _parse_atom_record(
     if len(line) < 54:
         return None
     record = line[0:6].strip()
-    if record != "ATOM":
+    resname = line[17:20].strip()
+    # Finding #9 (2026-05-21): accept HETATM lines whose resname is a known
+    # modified amino acid (MSE / SEC / PYL / HID / HIE / HIP / ...). Every
+    # other HETATM (waters, ligands, ions) is still ignored.
+    if record == "ATOM":
+        pass
+    elif record == "HETATM" and resname in HETATM_PROMOTED_RESNAMES:
+        pass
+    else:
         return None
     name = line[12:16].strip()
-    resname = line[17:20].strip()
     is_dna = resname in DNA_RESNAMES
     if is_dna:
         if not include_dna:
@@ -145,15 +217,28 @@ def _parse_atom_record(
         if name not in ("C1'", "C1*"):
             return None
     else:
-        if name not in TRACKED_ATOMS:
+        # Finding #61 (2026-05-21): accept OXT as a fallback for the
+        # carbonyl O on terminal residues. We do NOT also promote it when
+        # both O and OXT are present — that case keeps both records but
+        # only "O" populates the backbone slot (the "OXT" record is
+        # silently ignored by the grouping step below).
+        if name not in TRACKED_ATOMS and name != "OXT":
             return None
         if resname not in THREE_TO_ONE:
             return None
     altloc = line[16:17].strip()
     accepted_altlocs = ("", "A") if not keep_altloc_b else ("", "A", "B")
-    if altloc not in accepted_altlocs:
+    # When the caller did NOT request altloc-B handling, also accept altloc
+    # 'B' (and others) at parse time and let the grouping logic decide what
+    # to do — this is what makes finding #37 fixable for B-only residues.
+    # We tag the record with the original altloc letter so the grouper can
+    # still distinguish A vs B vs other.
+    if altloc not in accepted_altlocs and altloc not in ("B", "C", "D", "E"):
         return None
-    chain_id = line[21:22].strip() or "A"
+    # Finding #38 (2026-05-21): preserve a blank chain ID as the empty
+    # string instead of coercing it to "A". The downstream `_build_chain_index`
+    # treats distinct strings as distinct chain ints.
+    chain_id = line[21:22].strip()  # may be ""
     try:
         res_seq = int(line[22:26].strip())
         icode = line[26:27].strip()
@@ -162,6 +247,24 @@ def _parse_atom_record(
         z = float(line[46:54])
     except ValueError:
         return None
+    # Finding #46 (2026-05-21): reject non-finite coords (NaN / Inf).
+    # Without this, a `CA x=NaN` row parsed successfully and propagated NaN
+    # into every downstream geometric calculation.
+    import math as _math
+    if not (_math.isfinite(x) and _math.isfinite(y) and _math.isfinite(z)):
+        return None
+    # Finding #44 (2026-05-21): occupancy. PDB columns 54..60. Used as
+    # the tiebreaker when multiple records exist for the same atom name.
+    occupancy = 1.0
+    if len(line) >= 60:
+        occ_str = line[54:60].strip()
+        if occ_str:
+            try:
+                occ_val = float(occ_str)
+                if _math.isfinite(occ_val):
+                    occupancy = occ_val
+            except ValueError:
+                pass
     return {
         "name": name,
         "resname": resname,
@@ -171,6 +274,7 @@ def _parse_atom_record(
         "altloc": altloc,
         "is_dna": is_dna,
         "xyz": (x, y, z),
+        "occupancy": occupancy,
     }
 
 
@@ -283,20 +387,74 @@ def parse_pdb(
     if not pdb_path.is_file():
         raise FileNotFoundError(pdb_path)
 
-    # collect atoms grouped by (chain, resnum, icode, altloc) preserving
-    # file order. When lammps_compat_altloc=True we keep altloc-A and B
-    # in SEPARATE groups so we can insert the altloc-B as a shadow.
+    # collect atoms grouped by (chain_label, resnum, icode, altloc_key)
+    # preserving file order. When lammps_compat_altloc=True we keep altloc-A
+    # and B in SEPARATE groups so we can insert the altloc-B as a shadow.
     residues: list[dict] = []
     res_index: dict[tuple, int] = {}
     # Track every chain ID observed (across atom records that map to a
     # standard / mapped residue) so we can produce a helpful error if a
     # caller-supplied ``chains`` filter excludes everything.
     chains_seen: set = set()
+
+    # Finding #17 (2026-05-21): TER + non-contiguous same-letter chain
+    # segments must NOT be merged. We track a per-original-letter segment
+    # counter so that the second "A" segment after a TER becomes chain
+    # label ``A#2``, the third ``A#3``, etc. The visible label for the
+    # first occurrence of each letter is the unsuffixed letter (so no
+    # change for well-behaved PDBs).
+    chain_segment_counter: dict[str, int] = {}
+    # The current segment label per original chain letter, refreshed
+    # whenever we see a TER record for that chain.
+    chain_current_segment: dict[str, str] = {}
+    # Set of letters retired by the most recent TER record. We only
+    # advance a chain's segment number the first time we see an ATOM
+    # record from that letter AFTER a TER (so a TER followed by an ATOM
+    # for a different letter doesn't trip the counter).
+    pending_segment_advance: set = set()
+
+    def _segment_label(orig_letter: str) -> str:
+        """Return the (possibly suffixed) chain label for the CURRENT
+        segment of ``orig_letter``. Advances the segment counter once
+        per post-TER first-seen ATOM."""
+        if orig_letter in pending_segment_advance:
+            pending_segment_advance.discard(orig_letter)
+            n = chain_segment_counter.get(orig_letter, 1) + 1
+            chain_segment_counter[orig_letter] = n
+            chain_current_segment[orig_letter] = f"{orig_letter}#{n}"
+        elif orig_letter not in chain_current_segment:
+            chain_segment_counter[orig_letter] = 1
+            chain_current_segment[orig_letter] = orig_letter
+        return chain_current_segment[orig_letter]
+
+    # Finding #60 (2026-05-21): MODEL/ENDMDL discipline. If MODEL records
+    # appear, we keep only the first model. Two cases:
+    #  - MODEL N ... ENDMDL ... MODEL N+1: stop at ENDMDL (existing behaviour).
+    #  - MODEL N ... MODEL N+1 (missing ENDMDL): stop at second MODEL.
+    seen_model = False
+
     with pdb_path.open("r") as fh:
         for line in fh:
+            # Finding #60 (2026-05-21): stop on second MODEL even if no
+            # ENDMDL appeared between them.
+            if line.startswith("MODEL"):
+                if seen_model:
+                    break
+                seen_model = True
+                continue
             if line.startswith("ENDMDL"):  # stop after first model
                 break
+            # Finding #45 (2026-05-21): END terminates coordinate parsing.
+            # Distinct from ENDMDL — atoms after END must be ignored.
+            if line.startswith("END") and not line.startswith("ENDMDL"):
+                break
             if line.startswith("TER"):
+                # Finding #17 (2026-05-21): a TER means the next ATOM
+                # records for ANY chain letter previously seen are a
+                # new segment. We mark every letter we've seen so far
+                # as pending; whichever one shows up next is bumped.
+                for k in list(chain_current_segment.keys()):
+                    pending_segment_advance.add(k)
                 continue
             rec = _parse_atom_record(
                 line,
@@ -305,27 +463,116 @@ def parse_pdb(
             )
             if rec is None:
                 continue
-            chains_seen.add(rec["chain"])
-            if chains is not None and rec["chain"] not in chains:
+            orig_chain = rec["chain"]
+            # Determine the visible (post-TER-aware) chain label.
+            chain_label = _segment_label(orig_chain)
+            chains_seen.add(chain_label)
+            # When the user passes ``chains=['A']`` and the file contains
+            # both segment ``A`` and ``A#2`` after a TER, treat both as
+            # matching — the user's literal letter is what they typed.
+            if chains is not None and (
+                chain_label not in chains and orig_chain not in chains
+            ):
                 continue
-            # group key: when lammps_compat_altloc, B records form a
-            # SEPARATE group so we know where to insert the shadow.
-            altloc_key = "B" if (lammps_compat_altloc and rec["altloc"] == "B") else "A"
-            key = (rec["chain"], rec["resnum"], rec["icode"], altloc_key)
+            altloc = rec["altloc"]
+            # Default mode: only B-as-shadow when lammps_compat_altloc=True.
+            # Otherwise we KEEP altloc-B records here too (tag them as 'B')
+            # because finding #37 needs us to keep an altloc-B record when
+            # no altloc-A exists for that residue. The B records are
+            # silently dropped at the end of grouping IF a corresponding
+            # altloc-A record exists.
+            altloc_key = "B" if (lammps_compat_altloc and altloc == "B") else "A"
+            key = (chain_label, rec["resnum"], rec["icode"], altloc_key)
             if key not in res_index:
                 res_index[key] = len(residues)
                 residues.append({
-                    "chain": rec["chain"],
+                    "chain": chain_label,
                     "resnum": rec["resnum"],
                     "icode": rec["icode"],
                     "resname": rec["resname"],
                     "altloc_key": altloc_key,
                     "is_dna": rec["is_dna"],
                     "atoms": {},
+                    # observed altlocs in this residue (used by #37 fallback)
+                    "_altlocs_seen": set(),
                 })
             ri = res_index[key]
-            # multiple records for the same atom name: keep first
-            residues[ri]["atoms"].setdefault(rec["name"], rec["xyz"])
+            r = residues[ri]
+            r["_altlocs_seen"].add(altloc)
+            # Finding #53 (2026-05-21): refuse to merge two different resnames
+            # at the same (chain, resnum, icode) key. ALA + GLY at A:1 was
+            # silently merged into one ALA residue (the first resname seen).
+            if not rec["is_dna"] and r["resname"] != rec["resname"]:
+                raise ValueError(
+                    f"PDB {pdb_path.name} has conflicting residue names at "
+                    f"{chain_label}:{rec['resnum']}{rec['icode'] or ''} "
+                    f"({r['resname']} and {rec['resname']}). Microheterogeneous "
+                    f"residues must use altloc to disambiguate."
+                )
+            # Finding #44 (2026-05-21): pick the record with the highest
+            # occupancy when multiple records exist for the same atom name
+            # within a residue. The atom dict value is now a (xyz, occ) tuple
+            # internally; we keep the legacy "atoms[name] = xyz" shape after
+            # the grouping pass completes.
+            atom_name = rec["name"]
+            existing = r["atoms"].get(atom_name)
+            if existing is None:
+                r["atoms"][atom_name] = (rec["xyz"], rec["occupancy"], altloc)
+            else:
+                _, existing_occ, existing_altloc = existing
+                # Same altloc letter -> use the higher occupancy.
+                # Different altloc (B vs A) -> let the altloc logic win.
+                if altloc == existing_altloc:
+                    if rec["occupancy"] > existing_occ:
+                        r["atoms"][atom_name] = (
+                            rec["xyz"], rec["occupancy"], altloc
+                        )
+
+    # Finding #37 (2026-05-21): handle altloc-B-only residues. In default
+    # mode (`lammps_compat_altloc=False`) we kept altloc-B atom records
+    # grouped into an "A" key. We now finalize: for each residue,
+    # if every atom we collected is altloc 'B' and no altloc 'A' was
+    # seen, that's an altloc-B-only residue — keep it. Otherwise filter
+    # out the altloc-B atoms (consistent with the previous "A-only"
+    # default). In lammps_compat_altloc mode altloc-B atoms live in a
+    # separate group keyed by altloc_key == 'B', so this filter only
+    # touches the 'A' groups.
+    for r in residues:
+        if r["altloc_key"] != "A":
+            continue
+        seen = r["_altlocs_seen"]
+        b_only = (not ({"", "A"} & seen)) and ("B" in seen)
+        if b_only:
+            # Keep the B records — this is the altloc-B-only case.
+            continue
+        # Otherwise drop any atom whose stored altloc is 'B' (because a
+        # better altloc-'' or 'A' record must exist for the residue, even
+        # if not for this exact atom name — defensive).
+        r["atoms"] = {
+            name: tup for name, tup in r["atoms"].items()
+            if tup[2] in ("", "A")
+        } or r["atoms"]  # if filtering empties the dict, keep what we had
+
+    # Finding #61 (2026-05-21): promote OXT to O when the residue is
+    # missing the carbonyl O but has OXT (terminal-O fallback).
+    for r in residues:
+        if "O" not in r["atoms"] and "OXT" in r["atoms"]:
+            r["atoms"]["O"] = r["atoms"]["OXT"]
+
+    # Strip OXT from the atoms dict (it was only useful as a fallback
+    # for O — it has no slot in the output tensors).
+    for r in residues:
+        r["atoms"].pop("OXT", None)
+
+    # Flatten the (xyz, occ, altloc) tuples back to plain xyz tuples
+    # for the rest of the pipeline.
+    for r in residues:
+        r["atoms"] = {
+            name: tup[0] if isinstance(tup, tuple) and len(tup) == 3 else tup
+            for name, tup in r["atoms"].items()
+        }
+        # remove the diagnostic set so downstream code doesn't trip on it
+        r.pop("_altlocs_seen", None)
 
     # In lammps_compat_altloc mode, weave the altloc-B groups in
     # immediately after the matching altloc-A residue, AND fill in any
@@ -335,6 +582,20 @@ def parse_pdb(
     # of the altloc-A record. Without this inheritance the strict
     # backbone filter below would drop every B shadow.
     if lammps_compat_altloc:
+        # Finding #37 (2026-05-21): re-tag altloc-B residues with NO
+        # matching altloc-A as primary (altloc_key="A") so they aren't
+        # treated as shadows. Without this they'd index a stale eq_list
+        # entry in _build_lammps_emit_rows or hit IndexError.
+        _a_keys = {
+            (r["chain"], r["resnum"], r["icode"])
+            for r in residues if r["altloc_key"] == "A"
+        }
+        for r in residues:
+            if (
+                r["altloc_key"] == "B"
+                and (r["chain"], r["resnum"], r["icode"]) not in _a_keys
+            ):
+                r["altloc_key"] = "A"
         residues = _weave_altloc_b_shadows(residues)
         _inherit_backbone_to_altloc_b(residues)
 

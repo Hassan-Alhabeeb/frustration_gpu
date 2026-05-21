@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import torch
 
+from .parser import ONE_TO_IDX
+
 # Trans coefficients (default for all residues except IPR cis-proline).
 _TRANS = {
     "N": (0.48318, 0.70328, -0.18643),
@@ -45,6 +47,9 @@ _CIS_PRO = {
     "H": (-0.9871, 0.9326, 1.0604),
 }
 
+# Gamma-column index for PRO (canonicalised IPR maps here too — see parser.py).
+_PRO_IDX: int = ONE_TO_IDX["P"]
+
 
 def compute_virtual_atoms(
     parsed: dict[str, torch.Tensor | list],
@@ -57,21 +62,22 @@ def compute_virtual_atoms(
     ----------
     parsed : dict
         Output of :func:`src.parser.parse_pdb`. Must contain ``ca_coords``,
-        ``o_coords``, ``chain_ids``, ``residue_types``.
+        ``o_coords``, ``chain_ids``, ``residue_types``, ``residue_numbers``.
     use_cis_proline : bool
-        If True, residues annotated as IPR get the cis-proline coefficient set.
-        We don't currently re-parse the PDB looking for IPR codes — the parser
-        canonicalises any PRO to ``PRO`` -> index 14. The flag therefore has no
-        effect unless the parser is taught to preserve ``IPR``. Default False
-        matches frustrapy. **Flagged uncertain** — preserved here for forward
-        compatibility.
+        If True, **proline-only**: residues whose ``residue_types`` index is the
+        PRO column get the cis-proline coefficient set; all other residues use
+        the trans coefficients. QA-MISC #13 fix (2026-05-21) — was previously
+        applied globally to EVERY residue, which silently corrupted N/H/C for
+        non-proline residues. Default False matches frustrapy and reproduces
+        the legacy behaviour of returning trans for every residue.
 
     Returns
     -------
     dict with the virtual-atom tensors. Each is (N, 3), in angstroms. Where the
-    formula needs an atom that doesn't exist (e.g. CA at i-1 for the first
-    residue of a chain, or O at i-1 for chain start, or CA at i+1 for chain
-    end), the corresponding row is filled with NaN.
+    formula needs an atom that doesn't exist (CA at i-1 for the first residue
+    of a chain, or O at i-1 for chain start, or CA at i+1 for chain end, OR
+    crossing a sequence-numbering gap inside one chain — i.e. TER-separated or
+    missing-residue boundary) the corresponding row is filled with NaN.
 
     The keys returned are ``n_virtual``, ``h_virtual``, ``c_virtual``. The
     original parsed CA and O are not modified — the caller can still pull the
@@ -83,6 +89,11 @@ def compute_virtual_atoms(
       auto-grad friendly out of the box.
     * Coefficients are kept as Python floats and broadcast against the input
       device / dtype — no implicit promotion.
+    * QA-MISC #33 (2026-05-21): the i-1 / i+1 neighbour test now requires the
+      neighbour to be in the SAME chain AND adjacent in sequence numbering
+      (``resnum[i] - resnum[i-1] == 1``). Previously a same-chain neighbour
+      across a TER-separated gap or a missing-residue gap would be silently
+      used, producing virtual atoms anchored to a physically distant CA.
     """
     ca = parsed["ca_coords"]                      # (N, 3)
     o = parsed["o_coords"]                        # (N, 3)
@@ -90,14 +101,26 @@ def compute_virtual_atoms(
     dtype = ca.dtype
     n_res = ca.shape[0]
     chains = parsed["chain_ids"]
+    # Residue numbers are used for the sequence-gap test. Fall back to a
+    # contiguous integer range if the caller fed us a minimal dict (some
+    # synthetic test fixtures don't provide residue_numbers).
+    resnums = parsed.get("residue_numbers")
+    if resnums is None:
+        resnums = torch.arange(n_res, dtype=torch.int64, device=device)
+    else:
+        resnums = resnums.to(device=device)
 
-    # boolean masks: which residues have a valid i-1 (same chain) and i+1 (same chain)?
+    # boolean masks: which residues have a valid i-1 / i+1 (same chain AND
+    # adjacent in sequence numbering)?
     has_prev = torch.zeros(n_res, dtype=torch.bool, device=device)
     has_next = torch.zeros(n_res, dtype=torch.bool, device=device)
+    resnums_list = resnums.detach().cpu().tolist()
     for i in range(n_res):
-        if i > 0 and chains[i] == chains[i - 1]:
+        if i > 0 and chains[i] == chains[i - 1] \
+                and (resnums_list[i] - resnums_list[i - 1]) == 1:
             has_prev[i] = True
-        if i < n_res - 1 and chains[i] == chains[i + 1]:
+        if i < n_res - 1 and chains[i] == chains[i + 1] \
+                and (resnums_list[i + 1] - resnums_list[i]) == 1:
             has_next[i] = True
 
     # shifted tensors: ca_prev[i] = ca[i-1] (or NaN), o_prev[i] = o[i-1] (or NaN)
@@ -106,15 +129,29 @@ def compute_virtual_atoms(
     o_prev = torch.where(has_prev.unsqueeze(1), torch.roll(o, shifts=1, dims=0), nan)
     ca_next = torch.where(has_next.unsqueeze(1), torch.roll(ca, shifts=-1, dims=0), nan)
 
-    coeffs = _CIS_PRO if use_cis_proline else _TRANS
-    a, b, c = coeffs["N"]
-    n_v = a * ca_prev + b * ca + c * o_prev
+    # Compute both coefficient branches; blend per-residue per the
+    # ``use_cis_proline`` flag and the actual PRO identity.
+    def _build(coeffs):
+        a_n, b_n, c_n = coeffs["N"]
+        a_c, b_c, c_c = coeffs["C"]
+        a_h, b_h, c_h = coeffs["H"]
+        return (
+            a_n * ca_prev + b_n * ca + c_n * o_prev,
+            a_c * ca + b_c * ca_next + c_c * o,
+            a_h * ca_prev + b_h * ca + c_h * o_prev,
+        )
 
-    a, b, c = coeffs["C"]
-    c_v = a * ca + b * ca_next + c * o
-
-    a, b, c = coeffs["H"]
-    h_v = a * ca_prev + b * ca + c * o_prev
+    n_v, c_v, h_v = _build(_TRANS)
+    if use_cis_proline:
+        # Build a per-residue mask: True only on proline positions. Anywhere
+        # the mask is True, swap in the cis coefficients.
+        rtypes = parsed.get("residue_types")
+        if rtypes is not None:
+            is_pro = (rtypes.to(device=device) == _PRO_IDX).unsqueeze(-1)  # (N, 1)
+            n_cis, c_cis, h_cis = _build(_CIS_PRO)
+            n_v = torch.where(is_pro, n_cis, n_v)
+            c_v = torch.where(is_pro, c_cis, c_v)
+            h_v = torch.where(is_pro, h_cis, h_v)
 
     return {
         "n_virtual": n_v.to(dtype=dtype),

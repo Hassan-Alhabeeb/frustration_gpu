@@ -122,10 +122,15 @@ import functools
 
 import torch
 
+import warnings
+
 from ._contact_common import (
     ContactContext,
     _build_chain_index,
+    _check_no_dna_sentinel,
     _resolve_contact_coords,
+    _validate_context_device,
+    _validate_context_fingerprint,
 )
 from .burial import compute_rho
 from .contact_gamma import load_direct_gamma, load_mediated_gamma
@@ -347,10 +352,26 @@ def sample_configurational_decoys(
     else:
         device = torch.device(device)
 
+    # Finding #22 — n_decoys >= 2 (std otherwise undefined / FI silently 0).
+    if int(n_decoys) < 2:
+        raise ValueError(
+            f"sample_configurational_decoys requires n_decoys >= 2 (got {n_decoys})."
+        )
+
+    # Finding #10 — DNA sentinel guard.
+    _check_no_dna_sentinel(coords["residue_types"])
+
     cb_or_ca = _resolve_contact_coords(coords, device=device)        # (N, 3)
     aa = coords["residue_types"].to(device=device, dtype=torch.int64)  # (N,)
-    rho = rho.to(device=device, dtype=cb_or_ca.dtype)                  # (N,)
     n = cb_or_ca.shape[0]
+
+    # Finding #54 — rho must be a length-N 1-D tensor.
+    if rho.shape != (n,):
+        raise ValueError(
+            f"rho shape {tuple(rho.shape)} does not match (N,) where "
+            f"N=len(coords['ca_coords'])={n}."
+        )
+    rho = rho.to(device=device, dtype=cb_or_ca.dtype)                  # (N,)
 
     if n < 2:
         raise ValueError(
@@ -367,6 +388,15 @@ def sample_configurational_decoys(
     # Speed-fix4 SPEED-2 Idea 2: re-use ``_context.dist_full`` when the
     # caller has already built it. Construction is bit-identical to the
     # inline path here.
+    #
+    # Finding #30 — fingerprint guard. Without this check, a caller can build
+    # a context from structure A and feed coords from structure B; the cached
+    # `_context.dist_full` would silently mix with the new coords. Mirror the
+    # direct/water/DH energy modules' pattern: validate device first, then
+    # fingerprint, before consuming any cached tensor.
+    if _context is not None:
+        _validate_context_device(_context, device)
+        _validate_context_fingerprint(_context, coords)
     if _context is not None and _context.dist_full is not None:
         dist_full = _context.dist_full.to(device=device, dtype=cb_or_ca.dtype)
     else:
@@ -540,6 +570,38 @@ def compute_configurational_decoy_energy(
     rho_i = decoys["rho_i_decoy"]
     rho_j = decoys["rho_j_decoy"]
 
+    # Finding #55 — every decoy field must share the same 1-D length.
+    field_shapes = {
+        "aa_i_decoy": tuple(aa_i.shape),
+        "aa_j_decoy": tuple(aa_j.shape),
+        "rij_decoy": tuple(rij.shape),
+        "rho_i_decoy": tuple(rho_i.shape),
+        "rho_j_decoy": tuple(rho_j.shape),
+    }
+    distinct = set(field_shapes.values())
+    if len(distinct) != 1:
+        raise ValueError(
+            f"compute_configurational_decoy_energy: decoy field shapes "
+            f"disagree (would silently broadcast). Got {field_shapes}."
+        )
+    only_shape = next(iter(distinct))
+    if len(only_shape) != 1:
+        raise ValueError(
+            f"compute_configurational_decoy_energy: decoy fields must be "
+            f"1-D, got shape {only_shape}."
+        )
+    n_decoys = only_shape[0]
+    # Finding #22 — std needs >= 2.
+    if n_decoys < 2:
+        raise ValueError(
+            f"compute_configurational_decoy_energy: n_decoys >= 2 required "
+            f"(got {n_decoys}); std is undefined."
+        )
+
+    # Finding #10 — guard against DNA sentinels in the decoy aa indices.
+    _check_no_dna_sentinel(aa_i)
+    _check_no_dna_sentinel(aa_j)
+
     if device is None:
         device = rij.device
     else:
@@ -571,6 +633,27 @@ def compute_configurational_decoy_energy(
         burial_gamma = _cached_load_burial_gamma(device_str, dtype_str)
     else:
         burial_gamma = burial_gamma.to(device=device, dtype=dtype)
+
+    # Finding #43 — validate gamma table shapes. Index-wrap on (21, 21)
+    # tables would silently produce off-by-one γ values.
+    if tuple(gamma_direct.shape) != (20, 20):
+        raise ValueError(
+            f"gamma_direct must have shape (20, 20); got {tuple(gamma_direct.shape)}."
+        )
+    if tuple(gamma_mediated_protein.shape) != (20, 20):
+        raise ValueError(
+            f"gamma_mediated_protein must have shape (20, 20); got "
+            f"{tuple(gamma_mediated_protein.shape)}."
+        )
+    if tuple(gamma_mediated_water.shape) != (20, 20):
+        raise ValueError(
+            f"gamma_mediated_water must have shape (20, 20); got "
+            f"{tuple(gamma_mediated_water.shape)}."
+        )
+    if tuple(burial_gamma.shape) != (20, 3):
+        raise ValueError(
+            f"burial_gamma must have shape (20, 3); got {tuple(burial_gamma.shape)}."
+        )
 
     # --- per-decoy gamma gathers (ELEMENTWISE, length n_decoys) ------------
     # Pattern: ``g[aa_i, aa_j]`` with ``aa_i`` and ``aa_j`` both 1-D returns a
@@ -640,6 +723,16 @@ def compute_configurational_decoy_energy(
     decoy_mean = decoy_energies.mean()
     # population std (ddof=0) matches the C++ compute_array_std
     decoy_std = decoy_energies.std(unbiased=False)
+
+    # Finding #22 — emit a warning if the entire decoy std collapsed.
+    if bool((decoy_std == 0).item()):
+        warnings.warn(
+            "compute_configurational_decoy_energy: decoy_std == 0; FI would "
+            "be undefined for every native pair using this configurational "
+            "cache.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     return {
         "decoy_energies": decoy_energies,

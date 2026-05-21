@@ -199,7 +199,24 @@ def classify_frustration(
     Returns
     -------
     Integer tensor (``torch.long``) with the same shape as ``fi``.
+
+    Raises
+    ------
+    ValueError
+        If ``fi`` contains any non-finite entries (NaN or +/- inf). Silently
+        bucketing NaN into the neutral class (the legacy behaviour) hid
+        upstream decoy-stat failures; QA-MISC #15 fix (2026-05-21). Filter
+        the offending positions before calling, or replace them with a
+        sentinel of your choice.
     """
+    if fi.numel() and not bool(torch.isfinite(fi).all()):
+        n_bad = int((~torch.isfinite(fi)).sum().item())
+        raise ValueError(
+            f"classify_frustration: {n_bad} of {fi.numel()} input frustration "
+            "indices are non-finite (NaN or inf). Filter or replace these "
+            "before classifying — silently labelling them 'neutral' hides "
+            "decoy-stat failures upstream."
+        )
     cls = torch.ones_like(fi, dtype=torch.long)
     cls[fi <= high_threshold] = CLASS_HIGHLY
     cls[fi >= minimal_threshold] = CLASS_MINIMALLY
@@ -221,7 +238,23 @@ def welltype_from_contact(
     * 0 = ``short``           (r_ij < 6.5)
     * 1 = ``water-mediated``  (r_ij >= 6.5 AND rho_i < 2.6 AND rho_j < 2.6)
     * 2 = ``long``            (r_ij >= 6.5 AND (rho_i >= 2.6 OR rho_j >= 2.6))
+
+    Raises
+    ------
+    ValueError
+        If any of ``rij``, ``rho_i``, ``rho_j`` contains a non-finite value.
+        NaN was previously bucketed into the ``long`` class by default —
+        that produced biologically meaningless rows in the post-processed
+        contact dump. QA-MISC #40 fix (2026-05-21).
     """
+    if rij.numel():
+        bad = (~torch.isfinite(rij)) | (~torch.isfinite(rho_i)) | (~torch.isfinite(rho_j))
+        if bool(bad.any()):
+            n_bad = int(bad.sum().item())
+            raise ValueError(
+                f"welltype_from_contact: {n_bad} pairs have non-finite "
+                "r_ij / rho_i / rho_j. Filter or replace before classifying."
+            )
     short_mask = rij < r_short
     water_mask = (rho_i < rho_water_cutoff) & (rho_j < rho_water_cutoff)
     well = torch.full_like(rij, WELL_LONG, dtype=torch.long)
@@ -232,8 +265,26 @@ def welltype_from_contact(
 
 # --- helpers for the file writers --------------------------------------------
 def _aa_idx_to_letter(aa_idx: torch.Tensor) -> list[str]:
-    """Vectorised int → one-letter mapping using the OpenAWSEM gamma column order."""
-    return [_IDX_TO_ONE[int(a)] for a in aa_idx.tolist()]
+    """Vectorised int → one-letter mapping using the OpenAWSEM gamma column order.
+
+    Raises
+    ------
+    ValueError
+        If any entry is outside ``[0, 20)``. QA-MISC #51 fix (2026-05-21):
+        previously a DNA-sentinel ``-1`` (or any negative residue_type) would
+        index ``_IDX_TO_ONE[-1] == "V"`` and silently emit valine letters in
+        the dump, masking the upstream filter failure.
+    """
+    out: list[str] = []
+    for a in aa_idx.tolist():
+        ai = int(a)
+        if ai < 0 or ai >= 20:
+            raise ValueError(
+                f"_aa_idx_to_letter: residue_type {ai} out of range [0, 20). "
+                "Filter DNA / non-protein rows before emitting frustration dumps."
+            )
+        out.append(_IDX_TO_ONE[ai])
+    return out
 
 
 def _chain_letters(chain_ids: list[str], i_indices: torch.Tensor) -> list[str]:
@@ -457,6 +508,29 @@ def emit_singleresidue_dat(
     """
     p = Path(output_path)
     n = int(rho.numel())
+
+    # QA-MISC #62: validate that `rho` length matches the coord block.
+    # Previously the writer silently iterated for `n = rho.numel()` rows and
+    # would either truncate (rho shorter than coords) or IndexError-then-
+    # truncate (rho longer than coords). Both modes hid upstream length-mismatch
+    # bugs. Be strict: shapes must agree.
+    n_coords = int(coords["ca_coords"].shape[0])
+    if n != n_coords:
+        raise ValueError(
+            f"emit_singleresidue_dat: rho has length {n} but coords has "
+            f"{n_coords} residues — these must match."
+        )
+    for name in ("e_native", "decoy_mean", "decoy_std"):
+        t = {"e_native": e_native, "decoy_mean": decoy_mean,
+             "decoy_std": decoy_std}[name]
+        if t.numel() != n:
+            raise ValueError(
+                f"emit_singleresidue_dat: {name} length {t.numel()} != rho length {n}"
+            )
+    if fi is not None and fi.numel() != n:
+        raise ValueError(
+            f"emit_singleresidue_dat: fi length {fi.numel()} != rho length {n}"
+        )
 
     if fi is None:
         fi = (decoy_mean - e_native) / decoy_std

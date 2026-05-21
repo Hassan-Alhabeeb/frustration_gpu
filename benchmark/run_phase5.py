@@ -26,6 +26,7 @@ import argparse
 import csv
 import gc
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -48,7 +49,45 @@ from frustration_gpu.compute_frustration import compute_frustration  # noqa: E40
 BENCH_DIR = REPO_ROOT / "benchmark"
 PDB_PANEL_CSV = BENCH_DIR / "pdb_panel.csv"
 CPU_BASELINE_DIR = BENCH_DIR / "cpu_baseline"
-PDB_FILE_ROOT = REPO_ROOT.parent / "allosteric" / "data" / "pdb_files"
+
+# PDB-file resolver: mirrors ``tests/_paths.py`` so a fresh clone runs out of
+# the box on the four bundled PDBs (5AON, 11BG, 1O3S, 3F9M). Resolution order:
+#   1. ``--pdb-dir`` CLI arg (set in ``main()`` if non-empty)
+#   2. ``FRUSTRATION_PDB_DIR`` environment variable
+#   3. ``tests/data/`` bundled four-PDB panel
+#   4. Legacy developer-machine path
+# A given PDB falls back through these until one contains
+# ``<PDB>.pdb`` — so the bundled set covers the four-PDB head-to-head and
+# any extra PDB IDs in pdb_panel.csv still resolve from the legacy path if
+# the developer has it locally.
+_BUNDLED_PDB_DIR = REPO_ROOT / "tests" / "data"
+_LEGACY_PDB_DIR = Path("F:/research_plan/allosteric/data/pdb_files")
+
+
+def _candidate_pdb_dirs(cli_override: Path | None = None) -> List[Path]:
+    cands: List[Path] = []
+    if cli_override is not None:
+        cands.append(cli_override)
+    env = os.environ.get("FRUSTRATION_PDB_DIR")
+    if env:
+        cands.append(Path(env))
+    cands.append(_BUNDLED_PDB_DIR)
+    cands.append(_LEGACY_PDB_DIR)
+    # de-dup while preserving order
+    seen: set = set()
+    out: List[Path] = []
+    for c in cands:
+        s = str(c)
+        if s not in seen:
+            seen.add(s)
+            out.append(c)
+    return out
+
+
+# Global resolver list; populated in ``main()`` from CLI / env. Default value
+# (used at import time, e.g. by ``--help``) is the resolver chain without a
+# CLI override.
+PDB_DIR_CANDIDATES: List[Path] = _candidate_pdb_dirs()
 
 PHASE5_PANEL_CSV = BENCH_DIR / "phase5_panel_results.csv"
 PHASE5_FRUSTRAPY_CSV = BENCH_DIR / "phase5_frustrapy_comparison.csv"
@@ -78,10 +117,26 @@ def _read_panel() -> List[Dict[str, str]]:
 
 
 def _pdb_path(pdb_id: str) -> Path:
-    p = PDB_FILE_ROOT / f"{pdb_id}.pdb"
-    if not p.exists():
-        raise FileNotFoundError(f"PDB file not found locally: {p}")
-    return p
+    """Locate ``<pdb_id>.pdb`` through the resolver chain.
+
+    Searches the candidate directory list (CLI override → env →
+    bundled ``tests/data/`` → legacy developer path) and returns the
+    first hit. Raises ``FileNotFoundError`` listing every candidate
+    location that was checked so the user can fix the path or set
+    ``FRUSTRATION_PDB_DIR``.
+    """
+    checked: List[Path] = []
+    for root in PDB_DIR_CANDIDATES:
+        p = root / f"{pdb_id}.pdb"
+        checked.append(p)
+        if p.exists():
+            return p
+    raise FileNotFoundError(
+        f"PDB file not found locally for {pdb_id!r}. Checked: "
+        + "; ".join(str(c) for c in checked)
+        + ". Set FRUSTRATION_PDB_DIR or --pdb-dir to a directory "
+        f"containing {pdb_id}.pdb."
+    )
 
 
 def _read_lammps_pair_dump(path: Path) -> pd.DataFrame:
@@ -429,6 +484,11 @@ def main():
                     help="Comma-separated subset of modes to run.")
     ap.add_argument("--pdbs", default="",
                     help="Comma-separated subset of PDB IDs (default: all 20).")
+    ap.add_argument("--pdb-dir", default="",
+                    help="Override the PDB-file resolver chain. Resolution order "
+                         "is: this CLI arg -> FRUSTRATION_PDB_DIR env var -> bundled "
+                         "tests/data/ (4 PDBs) -> legacy developer path. The first "
+                         "directory that contains <pdb_id>.pdb wins per PDB.")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite phase5_panel_results.csv from scratch.")
     ap.add_argument("--spearman-only", action="store_true",
@@ -443,11 +503,34 @@ def main():
                          "sees an empty cache).")
     args = ap.parse_args()
 
+    # Resolve the PDB resolver chain now that we have CLI args.
+    cli_override: Path | None = None
+    if args.pdb_dir:
+        cli_override = Path(args.pdb_dir)
+    global PDB_DIR_CANDIDATES
+    PDB_DIR_CANDIDATES = _candidate_pdb_dirs(cli_override)
+    print(f"PDB resolver chain (first hit wins): "
+          + ", ".join(str(p) for p in PDB_DIR_CANDIDATES))
+
     panel = _read_panel()
     if args.pdbs:
         keep = set(args.pdbs.split(","))
         panel = [r for r in panel if r["pdb_id"] in keep]
-    modes_to_run = [m for m in args.modes.split(",") if m in MODES]
+
+    # Validate --modes BEFORE running anything so typos surface loudly.
+    requested = [m.strip() for m in args.modes.split(",") if m.strip()]
+    invalid = [m for m in requested if m not in MODES]
+    if invalid:
+        ap.error(
+            f"Unknown mode(s) in --modes: {invalid}. "
+            f"Valid modes: {list(MODES)}."
+        )
+    modes_to_run = [m for m in requested if m in MODES]
+    if not modes_to_run:
+        ap.error(
+            f"--modes resolved to an empty set after filtering. "
+            f"Valid modes: {list(MODES)}."
+        )
 
     print(f"Phase 5 panel: {len(panel)} PDBs, modes={modes_to_run}")
     print(f"  GPU: {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no-cuda'})")
@@ -564,23 +647,86 @@ def main():
                 done.add(key)
 
     # ---- Spearman validation pass ----
+    # Preserve any spearman rows already on disk (from previous process
+    # invocations) and only overwrite rows for which we have a fresh
+    # in-process cache hit. This fixes the previously-silent regression
+    # where a "default rerun after panel finished" would clobber a fully-
+    # populated phase5_spearman.csv with one or two rows from the current
+    # process's cache.
+    val_path = BENCH_DIR / "phase5_spearman.csv"
+    preserved: List[Dict[str, Any]] = []
+    if val_path.exists() and not args.force:
+        try:
+            preserved = pd.read_csv(val_path).to_dict("records")
+        except Exception as e:
+            print(f"  WARN: could not read existing {val_path.name}: {e}")
+            preserved = []
+    preserved_by_key = {(r["pdb"], r["mode"]): r for r in preserved}
+
+    # Auto-detect: which (pdb, mode) need a Spearman value but have no
+    # cache entry in this process? If the panel CSV says (pdb, mode, dev)
+    # finished "ok" but our cache is empty, run a one-shot --spearman-only
+    # equivalent for those pairs.
+    cache = getattr(_run_one, "_cache", {})
+    done_oks = {(r["pdb"], r["mode"]) for r in rows
+                if r.get("status") == "ok"
+                and r.get("device") in devices}
+    needs_cache: List[Tuple[str, str]] = []
+    for (pdb_id, mode) in sorted(done_oks):
+        if any((pdb_id, mode, d) in cache for d in devices):
+            continue  # we already have a fresh result for this (pdb, mode)
+        # Only fill in the cache for PDBs with an actual reference dump,
+        # otherwise the Spearman row would be all-NaN.
+        if mode == "singleresidue":
+            ref_exists = (CPU_BASELINE_DIR / mode /
+                          f"{pdb_id}_singleresidue.dat").exists()
+        else:
+            ref_exists = (CPU_BASELINE_DIR / mode /
+                          f"{pdb_id}_tertiary_frustration.dat").exists()
+        if ref_exists:
+            needs_cache.append((pdb_id, mode))
+
+    if needs_cache:
+        print(f"\nSpearman cache repopulation: {len(needs_cache)} (PDB, mode) "
+              f"need re-run (panel CSV is complete but in-process cache is empty).")
+        for pdb_id, mode in needs_cache:
+            for dev in devices:
+                # Skip CPU on >2000 res (matches the heuristic above).
+                prow_match = next(
+                    (p for p in panel if p["pdb_id"] == pdb_id), None
+                )
+                if (prow_match is not None and dev == "cpu"
+                        and int(prow_match.get("actual_residues", 0)) > 2000):
+                    continue
+                print(f"  CACHE {pdb_id} {mode} {dev}", flush=True)
+                out = _run_one(pdb_id, mode, dev)
+                if out["status"] != "ok":
+                    print(f"       -> status={out['status']}  "
+                          f"err={out['error'][:80]}")
+
     print("\nSpearman validation against LAMMPS reference dumps:")
-    val_rows = []
+    val_rows: List[Dict[str, Any]] = []
     cache = getattr(_run_one, "_cache", {})
     for prow in panel:
         pdb_id = prow["pdb_id"]
         for mode in modes_to_run:
-            sp = _spearman_vs_reference(pdb_id, mode, cache)
-            val_rows.append({"pdb": pdb_id, "mode": mode, **sp})
-            print(f"  {pdb_id:6s} {mode:14s}  "
-                  f"ref_fi={sp['ref_spearman_fi']:.4f}  "
-                  f"ref_dens={sp['ref_spearman_density_nhi']:.4f}  "
-                  f"cpu_vs_cuda_fi={sp['cpu_vs_cuda_spearman_fi']:.4f}  "
-                  f"max_abs_diff={sp['cpu_vs_cuda_max_abs_diff_fi']:.2e}")
+            has_any = any((pdb_id, mode, d) in cache for d in devices)
+            if has_any:
+                sp = _spearman_vs_reference(pdb_id, mode, cache)
+                val_rows.append({"pdb": pdb_id, "mode": mode, **sp})
+                print(f"  {pdb_id:6s} {mode:14s}  "
+                      f"ref_fi={sp['ref_spearman_fi']:.4f}  "
+                      f"ref_dens={sp['ref_spearman_density_nhi']:.4f}  "
+                      f"cpu_vs_cuda_fi={sp['cpu_vs_cuda_spearman_fi']:.4f}  "
+                      f"max_abs_diff={sp['cpu_vs_cuda_max_abs_diff_fi']:.2e}")
+            else:
+                # Fall back to the existing on-disk row, if any.
+                prev = preserved_by_key.get((pdb_id, mode))
+                if prev is not None:
+                    val_rows.append(prev)
 
-    val_path = BENCH_DIR / "phase5_spearman.csv"
     pd.DataFrame(val_rows).to_csv(val_path, index=False)
-    print(f"  -> {val_path}")
+    print(f"  -> {val_path}  ({len(val_rows)} rows)")
 
     # ---- Frustrapy comparison ----
     if args.frustrapy:

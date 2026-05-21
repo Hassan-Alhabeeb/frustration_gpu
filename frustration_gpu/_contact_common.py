@@ -51,9 +51,135 @@ over the row-major flatten of the upper-tri dense matrix.
 """
 from __future__ import annotations
 
+import math
+import warnings
 from dataclasses import dataclass
 
 import torch
+
+
+# --- Term-specific minimum-safe sparse cutoffs (Å) ----------------------------
+# When a SparseContactContext is used, pairs beyond ``sparse_cutoff`` are
+# DROPPED from the sum. For each AWSEM contact term, the integrand is
+# numerically non-zero out to a longer range than the nominal "well edge":
+#
+# * Direct contact: nominal r_max = 6.5 Å, but the tanh-shoulder tail leaves
+#   ~3 % of the well amplitude at r = 7.0 Å. We require ~7.5 Å so the dropped
+#   tail is ≤ 1 % of a typical pair contribution. Empirically verified on
+#   5AON: cutoff=6.5 → 0.51 kcal/mol drift (HIGH), cutoff=7.5 → < 0.01
+#   kcal/mol drift.
+# * Water-mediated: nominal r_max = 9.5 Å. The mediated tail decays more
+#   slowly than direct because the burial-blended γ stays ~O(1) and the
+#   sigmoid switches off late. 5AON: cutoff=9.5 → 0.46 kcal/mol drift
+#   (HIGH), cutoff=14.0 → matches dense to < 0.01 kcal/mol.
+# * Debye-Hückel: integrand ``exp(-r / λ)/r`` with λ=10 Å (default). At
+#   r = 30 Å the decay is exp(-3) ≈ 0.05 per pair, which can sum to a
+#   non-trivial residual across hundreds of charged pairs. 5AON: cutoff=11
+#   → sign flip (+0.15 vs −0.60), cutoff=30 → matches. The recommended
+#   minimum scales linearly with screening_length (3 λ).
+#
+# These are emitted as ``UserWarning`` (not raised) so legacy callers that
+# deliberately use a tight cutoff for a coarse estimate are not broken.
+DIRECT_SPARSE_MIN_SAFE_A: float = 7.5
+MEDIATED_SPARSE_MIN_SAFE_A: float = 14.0
+# DH min-safe is a function of screening_length; the helper below computes it.
+
+
+def dh_sparse_min_safe(screening_length: float, k_screening: float = 1.0) -> float:
+    """Minimum-safe sparse_cutoff (Å) for the Debye-Hückel term.
+
+    ``V_DH(r) = k_QQ * q_i q_j * exp(-k_screening * r / λ) / r`` decays with
+    effective inverse length ``k_screening / screening_length``. We need the
+    cutoff to span at least three e-folds (``exp(-3) ≈ 0.05`` per pair), and
+    the integrand also carries the slower ``1/r`` factor, so the practical
+    safe cutoff is **3 × λ_eff** where ``λ_eff = screening_length /
+    k_screening``. With the LAMMPS defaults λ=10 Å and k=1 this yields 30 Å.
+    """
+    lam_eff = float(screening_length) / float(k_screening)
+    return max(30.0, 3.0 * lam_eff)
+
+
+def _coords_fingerprint(t: torch.Tensor) -> tuple[int, int, float, float, float, float]:
+    """Cheap, side-effect-free fingerprint of a (N, 3) coord tensor.
+
+    Used to detect "stale ContactContext" — caller built a context from one
+    coords tensor and is now feeding a different coords tensor. We hash a
+    handful of stable scalars: ``(N, device-hash, first row sum, last row
+    sum, total sum, total absolute sum)``. Any one of these changing
+    overwhelmingly implies the underlying coordinates changed. NaN-safe via
+    ``nansum``.
+
+    Returns a tuple of plain Python numbers so it is cheap to compare and is
+    pickleable (frozen dataclasses).
+    """
+    n = int(t.shape[0])
+    if n == 0:
+        return (0, 0, 0.0, 0.0, 0.0, 0.0)
+    with torch.no_grad():
+        # Use nansum so NaN-rows do not poison the fingerprint
+        first = float(torch.nansum(t[0]).item())
+        last = float(torch.nansum(t[-1]).item())
+        total = float(torch.nansum(t).item())
+        abs_total = float(torch.nansum(t.abs()).item())
+    # device tied to fingerprint so a CPU→CUDA move would invalidate too
+    dev = t.device
+    dev_hash = hash((dev.type, dev.index))
+    return (n, dev_hash, first, last, total, abs_total)
+
+
+def _validate_context_device(
+    ctx: "ContactContext | SparseContactContext",
+    requested_device: torch.device,
+) -> None:
+    """Raise ValueError if the context is on a different device than requested.
+
+    Auto-moving the context would silently allocate a duplicate of the (N, N)
+    distance matrix (or N_pair sparse list) on the new device — expensive
+    and confusing — so we refuse and instruct the caller to rebuild instead.
+    Finding #11 — ``ContactContext device mismatch produces cryptic
+    cross-device failures``.
+    """
+    ctx_dev = ctx.device
+    req = torch.device(requested_device)
+    # ``cuda`` (no index) == ``cuda:0`` for our purposes; compare both type
+    # and index, treating ``index is None`` as wildcard.
+    if ctx_dev.type != req.type:
+        raise ValueError(
+            f"ContactContext is on device {ctx_dev}, but device={req} was "
+            "requested. Rebuild the context on the requested device "
+            "(build_contact_context(coords.to(device=...), ...)) — auto-"
+            "moving the cached (N, N) matrix would silently duplicate it."
+        )
+    if (
+        ctx_dev.index is not None
+        and req.index is not None
+        and ctx_dev.index != req.index
+    ):
+        raise ValueError(
+            f"ContactContext on {ctx_dev} but device={req} requested."
+        )
+
+
+def _validate_context_fingerprint(
+    ctx: "ContactContext | SparseContactContext",
+    coords: dict[str, torch.Tensor],
+) -> None:
+    """Raise ValueError if the ContactContext was built from different coords.
+
+    Without this check a caller can build a context from structure A and
+    invoke an energy function with coords from structure B, silently mixing
+    a stale (N, N) distance matrix with the new amino-acid identities.
+    Finding #30.
+    """
+    fp_now = _coords_fingerprint(_resolve_contact_coords(coords, device=ctx.device))
+    if ctx.fingerprint != fp_now:
+        raise ValueError(
+            "Stale ContactContext: its fingerprint does not match the "
+            "current `coords` (N, device, or coordinate values differ). "
+            "Rebuild the context with build_contact_context(coords, ...) "
+            "or call the energy function without _context= (it will build "
+            "a fresh context internally)."
+        )
 
 
 # --- DNA sentinel guard (QA-1 HIGH) ------------------------------------------
@@ -124,6 +250,10 @@ class ContactContext:
     n: int
     device: torch.device
     dtype: torch.dtype
+    # Finding #30 — stale-context guard. Fingerprint of the cb_or_ca tensor
+    # used to build this context. Each energy function compares its live
+    # `coords` against this and raises ValueError on mismatch.
+    fingerprint: tuple[int, int, float, float, float, float] = (0, 0, 0.0, 0.0, 0.0, 0.0)
     # Speed-fix4 SPEED-2 Idea 2: NaN-poisoned (N, N) distance matrix for decoy
     # callers. Same construction as decoys.py:362-378 / mutational_decoys.py:415-420
     # / singleresidue_decoys.py:283-292 (replace NaN rows in cb_or_ca with 1e6, take
@@ -176,10 +306,18 @@ class SparseContactContext:
     same_chain: torch.Tensor
     seq_diff: torch.Tensor
     pair_mask_min_sep: dict[int, torch.Tensor]
-    dist: torch.Tensor
     sparse_cutoff: float
     device: torch.device
     dtype: torch.dtype
+    # Finding #30 — stale-context guard (same semantics as ContactContext).
+    fingerprint: tuple[int, int, float, float, float, float] = (0, 0, 0.0, 0.0, 0.0, 0.0)
+    # Finding #42 — the dense ``(N, N)`` distance matrix used to be cached
+    # here for diagnostic ``return_pair_matrix=True`` callers. That defeats
+    # the memory-saving purpose of the sparse path. We now keep ``None`` by
+    # default; callers asking for the dense matrix in sparse + diagnostic
+    # mode get an explicit error. The field is kept for back-compat shape so
+    # ``hasattr(ctx, 'dist')`` still answers truthfully.
+    dist: torch.Tensor | None = None
 
 
 def build_contact_context(
@@ -242,16 +380,20 @@ def build_contact_context(
     n = cb_or_ca.shape[0]
     chain_idx = _build_chain_index(coords["chain_ids"], device=device)
 
-    # Raw symmetric distance — single allocation, shared.
-    with torch.no_grad():
-        if use_cdist:
-            dist = _pairwise_distance_cdist(cb_or_ca)
-        else:
-            diff_raw = cb_or_ca.unsqueeze(0) - cb_or_ca.unsqueeze(1)
-            dist = torch.linalg.vector_norm(diff_raw, dim=-1)
+    # Finding #30 — fingerprint pinned to the cb_or_ca tensor at build time.
+    fp = _coords_fingerprint(cb_or_ca)
 
     if sparse_cutoff is None:
-        # Dense path — original ContactContext behavior.
+        # Dense path — original ContactContext behavior. Always materialise
+        # the full (N, N) distance matrix because the geom_mask + dist_full
+        # consumers downstream rely on it.
+        with torch.no_grad():
+            if use_cdist:
+                dist = _pairwise_distance_cdist(cb_or_ca)
+            else:
+                diff_raw = cb_or_ca.unsqueeze(0) - cb_or_ca.unsqueeze(1)
+                dist = torch.linalg.vector_norm(diff_raw, dim=-1)
+
         geom_masks: dict[int, torch.Tensor] = {}
         for sep in seq_seps:
             geom_masks[int(sep)] = _pair_mask(cb_or_ca, chain_idx, int(sep))
@@ -282,31 +424,65 @@ def build_contact_context(
             n=n,
             device=device,
             dtype=dtype,
+            fingerprint=fp,
             dist_full=dist_full_opt,
         )
 
     # ---- Sparse path -------------------------------------------------------
-    # One dense scan (in no_grad to free as quickly as possible) extracts the
-    # pairs within the cutoff. NaN-row sanitization is applied so the scan
-    # itself doesn't trip on missing CB coords.
+    # Finding #42 — we used to build the full (N, N) distance matrix first
+    # and then slice. That defeats the sparse path's memory benefit. We now
+    # build pair distances ONLY for pairs inside ``sparse_cutoff`` using a
+    # chunked scan over ``i``. Pairs beyond the cutoff are never enumerated.
+    #
+    # Finding #56 — guard against NaN / inf / non-positive cutoff. Negative
+    # was already rejected; NaN slipped past because ``NaN <= 0`` is False,
+    # and ``inf`` would silently keep every pair.
     cutoff_f = float(sparse_cutoff)
+    if not math.isfinite(cutoff_f):
+        raise ValueError(
+            f"sparse_cutoff must be a finite positive value, got {cutoff_f}"
+        )
     if cutoff_f <= 0.0:
         raise ValueError(f"sparse_cutoff must be > 0, got {cutoff_f}")
 
+    # Chunked scan: walk ``i`` rows, compute distances from row ``i`` to the
+    # tail ``j ≥ i+1`` (already upper-tri), keep ``r < cutoff``. Peak memory
+    # is ``O(chunk × N × 3)`` for the diff intermediate — bounded — never
+    # ``O(N²)``. We keep chunk_size = 256 which is friendly to GPU + CPU
+    # cache lines and tested for byte-exact parity with the legacy dense
+    # path.
     with torch.no_grad():
-        valid_row = torch.isfinite(cb_or_ca).all(dim=-1)        # (N,)
-        # Upper-tri ``i < j`` selection, distance below cutoff, both rows finite.
-        triu_mask = torch.triu(
-            torch.ones((n, n), dtype=torch.bool, device=device),
-            diagonal=1,
-        )
-        finite_pair = valid_row.unsqueeze(0) & valid_row.unsqueeze(1)
-        within_cutoff = (dist < cutoff_f) & finite_pair & triu_mask
-        # ``nonzero`` gives row-major (= lex) order, which is exactly the
-        # ``i < j`` upper-tri row-major order we need for sum-ordering parity.
-        idx = within_cutoff.nonzero(as_tuple=False)             # (N_pair, 2)
-        pair_i = idx[:, 0].contiguous()
-        pair_j = idx[:, 1].contiguous()
+        valid_row_full = torch.isfinite(cb_or_ca).all(dim=-1)       # (N,)
+        i_list: list[torch.Tensor] = []
+        j_list: list[torch.Tensor] = []
+        chunk_size = 256
+        for start in range(0, n, chunk_size):
+            stop = min(start + chunk_size, n)
+            # Rows i in [start, stop). For upper-tri, j > i, so we slice
+            # the j-tail per row. We compute the full (chunk, N) block then
+            # zero out j ≤ i positions via a triu condition.
+            block_i = cb_or_ca[start:stop]                          # (c, 3)
+            diff_block = block_i.unsqueeze(1) - cb_or_ca.unsqueeze(0)  # (c, N, 3)
+            r_block = torch.linalg.vector_norm(diff_block, dim=-1)     # (c, N)
+            # j_idx > i for upper-tri.
+            i_idx_local = torch.arange(start, stop, device=device).unsqueeze(1)   # (c, 1)
+            j_idx_local = torch.arange(n, device=device).unsqueeze(0)             # (1, N)
+            upper_local = j_idx_local > i_idx_local                              # (c, N)
+            valid_block = (
+                valid_row_full[start:stop].unsqueeze(1)
+                & valid_row_full.unsqueeze(0)
+            )                                                                    # (c, N)
+            within = (r_block < cutoff_f) & upper_local & valid_block
+            idx_local = within.nonzero(as_tuple=False)                           # (k, 2)
+            if idx_local.numel() > 0:
+                i_list.append(idx_local[:, 0] + start)
+                j_list.append(idx_local[:, 1])
+        if i_list:
+            pair_i = torch.cat(i_list).contiguous()
+            pair_j = torch.cat(j_list).contiguous()
+        else:
+            pair_i = torch.empty((0,), dtype=torch.int64, device=device)
+            pair_j = torch.empty((0,), dtype=torch.int64, device=device)
 
     # Distances and chain/seq info for the selected pairs. Built OUTSIDE the
     # no_grad block so autograd flows from coords → r_ij → downstream energies.
@@ -334,10 +510,13 @@ def build_contact_context(
         same_chain=same_chain,
         seq_diff=seq_diff,
         pair_mask_min_sep=pair_masks,
-        dist=dist,
         sparse_cutoff=cutoff_f,
         device=device,
         dtype=dtype,
+        fingerprint=fp,
+        # Finding #42 — dense (N, N) `dist` intentionally not cached. Callers
+        # that need the full matrix should rebuild a dense ContactContext.
+        dist=None,
     )
 
 
@@ -353,6 +532,15 @@ def _resolve_contact_coords(
     whose CB is NaN (rare, but possible for badly-truncated PDB inputs) also
     falls back to CA. Residues with NaN in BOTH CA and CB remain NaN — they
     are flagged invalid by ``valid_row`` in :func:`_pair_mask`.
+
+    Finding #14 — when a non-glycine residue's CB is missing AND we fall
+    back to CA, the contact distance shifts by ~1.5 Å (the CA-CB bond
+    length) which alters native-pair enumeration and FI. Emit a
+    ``UserWarning`` listing the affected residue indices so the caller knows
+    to preprocess with PDBFixer or accept the bias. Glycine fallback is
+    silent (it is the documented LAMMPS-AWSEM behaviour). The check uses
+    ``residue_types`` if available; if absent we skip the warning (rare
+    direct-callsite path).
 
     Parameters
     ----------
@@ -372,6 +560,43 @@ def _resolve_contact_coords(
         cb = cb.to(device=device)
         ca = ca.to(device=device)
     nan_row = ~torch.isfinite(cb).all(dim=-1, keepdim=True)        # (N, 1)
+
+    # Finding #14 — warn (once per call) on non-Gly CB fallback.
+    # Glycine has residue_type index 7 in the OpenAWSEM gamma order
+    # (A R N D C Q E G ...). ``residue_types`` may be absent from
+    # synthetic test dicts; tolerate that quietly.
+    rt = coords.get("residue_types") if isinstance(coords, dict) else None
+    if rt is not None:
+        try:
+            nan_row_1d = nan_row.squeeze(-1)
+            if nan_row_1d.any():
+                rt_dev = rt.to(device=nan_row_1d.device)
+                # We only complain when residue_type is in [0, 20) AND not GLY.
+                # DNA sentinel (-1) and out-of-range values are policed by the
+                # DNA-sentinel guard / finding-#39 checks elsewhere.
+                in_range = (rt_dev >= 0) & (rt_dev < 20)
+                non_gly = rt_dev != 7
+                bad = nan_row_1d & in_range & non_gly
+                n_bad = int(bad.sum().item())
+                if n_bad > 0:
+                    idxs = torch.nonzero(bad, as_tuple=False).flatten().tolist()
+                    preview = idxs[:5]
+                    more = "" if n_bad <= 5 else f" (+{n_bad - 5} more)"
+                    warnings.warn(
+                        f"Effective-CB resolution: {n_bad} non-glycine "
+                        f"residue(s) have missing/NaN CB and were silently "
+                        f"substituted with CA. Indices: {preview}{more}. "
+                        "This shifts the contact geometry by ~1.5 Å (CA-CB "
+                        "bond length) and can alter native-pair enumeration "
+                        "and FI. Preprocess with PDBFixer or accept the "
+                        "bias.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+        except Exception:
+            # Never let the diagnostic warning crash the energy path.
+            pass
+
     return torch.where(nan_row, ca, cb)
 
 
@@ -547,6 +772,60 @@ def _pair_mask(
     return valid_pair & sep_ok & not_self
 
 
+def _check_residue_types_in_range(residue_types: torch.Tensor) -> None:
+    """Validate that residue_types are in ``[0, 20)``.
+
+    Finding #39 — positive out-of-range residue_types (>= 20) used to raise a
+    raw ``IndexError`` inside ``gamma[aa_i, aa_j]``; negative values (DNA
+    sentinel) were already caught by :func:`_check_no_dna_sentinel`. This
+    helper composes both checks into a single clear error.
+    """
+    if residue_types.numel() == 0:
+        return
+    if (residue_types < 0).any() or (residue_types >= 20).any():
+        rt_min = int(residue_types.min().item())
+        rt_max = int(residue_types.max().item())
+        raise ValueError(
+            f"residue_types must lie in [0, 20); got min={rt_min}, max={rt_max}. "
+            "Values < 0 typically mean DNA sentinels (parser include_dna=True); "
+            "values >= 20 mean a non-canonical residue index slipped through "
+            "the parser's THREE_TO_ONE mapping."
+        )
+
+
+def _warn_sparse_cutoff(
+    term_name: str,
+    ctx: "SparseContactContext",
+    min_safe_a: float,
+    extra_advice: str = "",
+) -> None:
+    """Emit a UserWarning when a SparseContactContext is too tight for a term.
+
+    Findings #28 / #29 / #47 — different AWSEM contact terms have different
+    minimum-safe sparse_cutoff values (see ``DIRECT_SPARSE_MIN_SAFE_A`` etc.
+    in this module). When a user reuses a tight context (built for the
+    direct shell or burial scan, say) for a longer-range term (water-
+    mediated or DH), the dropped tail accumulates to a material kcal/mol
+    drift — sometimes a sign flip on DH. We refuse to do this silently.
+    """
+    if ctx.sparse_cutoff < min_safe_a:
+        advice = (
+            f"Rebuild via build_contact_context(coords, sparse_cutoff={min_safe_a}). "
+        )
+        if extra_advice:
+            advice += extra_advice
+        warnings.warn(
+            f"{term_name}: SparseContactContext was built with sparse_cutoff="
+            f"{ctx.sparse_cutoff} Å, which is below the recommended minimum "
+            f"{min_safe_a} Å for this term. Pairs in the tail beyond the "
+            "cutoff are dropped from the sum and the energy can drift by "
+            "significant fractions of a kcal/mol (and in the DH case can "
+            f"sign-flip). {advice}",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
 __all__ = [
     "_resolve_contact_coords",
     "_build_chain_index",
@@ -554,7 +833,14 @@ __all__ = [
     "_pairwise_distance_cdist",
     "_pair_mask",
     "_check_no_dna_sentinel",
+    "_check_residue_types_in_range",
+    "_validate_context_device",
+    "_validate_context_fingerprint",
+    "_warn_sparse_cutoff",
     "ContactContext",
     "SparseContactContext",
     "build_contact_context",
+    "DIRECT_SPARSE_MIN_SAFE_A",
+    "MEDIATED_SPARSE_MIN_SAFE_A",
+    "dh_sparse_min_safe",
 ]

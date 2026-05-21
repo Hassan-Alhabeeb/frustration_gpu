@@ -1,6 +1,6 @@
 # Quickstart, 10 minutes from clone to first result
 
-From a fresh clone to all three frustration modes on real PDBs, on CPU and (optionally) GPU. Code blocks below are excerpts adapted from `examples/`; the example scripts themselves are run by the test suite.
+From a fresh clone to all three frustration modes on real PDBs, on CPU and (optionally) GPU. Code blocks below are excerpts adapted from `examples/`; each example script is smoke-tested in CI against the four bundled PDBs in `tests/data/` (see `tests/test_examples_smoke.py`), so the code paths shown here are kept honest.
 
 ## 1. Install
 
@@ -101,7 +101,7 @@ diff = np.abs(
 print(f"max |FI_CPU - FI_CUDA| = {diff:.2e}")    # observed = 0.0
 ```
 
-Both paths run in float64. CPU and CUDA share the same RNG seed and the same numerical algorithm, so per-pair FI agreement is exact (= 0.0): the FI quantile absorbs the last-ULP reduction-order drifts that do appear in `decoy_mean` / `decoy_std`. See `benchmark/phase5_spearman.csv` for the full 30-combo table.
+Both paths run in float64. CPU and CUDA share the same RNG seed and the same numerical algorithm. At the default `precision=3` (LAMMPS's `%8.3f`) the rounded FI values are exactly identical; the underlying high-precision FI differs only by reduction-order ULP drift in `decoy_mean` / `decoy_std` (~1e-15 in absolute terms, well below the rounded `0.000`). See `benchmark/phase5_spearman.csv` for the full 30-combo table.
 
 ## 7. Optional: Debye-Huckel electrostatics
 

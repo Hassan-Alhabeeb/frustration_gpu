@@ -1,10 +1,12 @@
 # frustration_gpu — Public API Reference
 
-Last updated: 2026-05-20 (Phase 4.5 — LAMMPS-compat fixes shipped)
+Last updated: 2026-05-21 (post `src/` → `frustration_gpu/` rename;
+`overwrite` / `n_cpus` accepted in the `calculate_frustration` adapter).
 
-This document covers every public symbol exported from `src.__init__.py`.
-For the conceptual overview see `PHASES_ROADMAP.md`; for the full kwarg-by-kwarg
-comparison against frustrapy see `docs/frustrapy_vs_us.md`.
+This document covers every public symbol exported from
+`frustration_gpu/__init__.py`. For the conceptual overview see
+`PHASES_ROADMAP.md`; for the full kwarg-by-kwarg comparison against
+frustrapy see `docs/frustrapy_vs_us.md`.
 
 ---
 
@@ -56,7 +58,7 @@ def compute_frustration(
     pdb_file: str | Path,
     *,
     mode: Literal["configurational", "mutational", "singleresidue"] = "configurational",
-    chain: str | None = None,
+    chain: str | list[str] | None = None,
     residues: dict[str, list[int]] | None = None,
     electrostatics_k: float | None = None,
     include_dh_in_e_native: bool = False,
@@ -80,7 +82,7 @@ def compute_frustration(
 |---|---|---|---|
 | `pdb_file` | `str` or `Path` | required | Path to input PDB file. |
 | `mode` | `"configurational" / "mutational" / "singleresidue"` | `"configurational"` | Decoy ensemble convention. |
-| `chain` | `str` or `None` | `None` | Restrict the *whole* pipeline to one chain (parser-level filter). |
+| `chain` | `str`, `list[str]`, or `None` | `None` | Restrict the *whole* pipeline to one chain or a set of chains. The filter is applied at the parser level — burial / decoys / output all see only the selected chains. A single string `"A"` and a single-element list `["A"]` are equivalent. A multi-chain list `["A", "B"]` runs the pipeline on both chains together (cross-chain native pairs are included). |
 | `residues` | `dict[str, list[int]]` or `None` | `None` | Post-filter map `chain → [resnum, ...]` applied to result dataframes. Decoys still computed on the full structure. |
 | `electrostatics_k` | `float` or `None` | `None` | Debye-Hückel prefactor `k_QQ`. `None` → DH skipped. `4.15` reproduces stock `fix_backbone_coeff.data`. By default DH is metadata-only; see `include_dh_in_e_native`. |
 | `include_dh_in_e_native` | `bool` | `False` | Add DH to per-pair `E_native`. Default `False` matches LAMMPS analysis convention (DH in dynamics only, not analysis). |
@@ -155,7 +157,7 @@ def calculate_frustration(
     n_decoys: int = 1000,
     device: str = "auto",
     results_dir: str | Path | None = None,   # frustrapy name
-    output_dir: str | Path | None = None,    # our name (wins if both set)
+    output_dir: str | Path | None = None,    # our name; wins if both set
     seed: int = 0,
     precision: int = 3,
     graphics: bool = False,                  # accepted, ignored
@@ -167,6 +169,8 @@ def calculate_frustration(
     keep_incomplete_backbone: bool = False,
     include_dna: bool = False,
     lammps_compat_altloc: bool = False,
+    overwrite: bool = False,                 # accepted, always overwrites
+    n_cpus: int | None = None,               # accepted, ignored
 ) -> FrustrationResult
 ```
 
@@ -175,11 +179,23 @@ def calculate_frustration(
 | frustrapy | this adapter | Notes |
 |---|---|---|
 | `results_dir` | `results_dir` (mapped to `output_dir`) | If both set, `output_dir` wins. |
-| `chain` (str or list) | `chain` | Accepts list; multi-chain runs the full pipeline then post-filters. |
+| `chain` (str or list) | `chain` | Accepts both shapes; the adapter forwards `chain` unchanged to `compute_frustration`, which applies a **parser-level** filter (only the selected chain(s) are loaded). This differs from frustrapy's earlier "run-then-post-filter" semantics — see [the chain-filter note](#chain-filter-semantics). |
 | `is_mutation_calculation=True` | → `mode="mutational"` | Legacy synonym. |
 | `graphics` / `visualization` | accepted, ignored (one-time warn) | VMD/PyMOL emission not yet implemented. |
 | `debug`, `pbar` | accepted, ignored | No-op. |
 | `pdb_id` | accepted, ignored | We do NOT auto-download from RCSB; pass a local `pdb_file`. |
+| `overwrite` | accepted, no-op | The PyTorch port always overwrites existing output files; the flag is consumed for API parity. |
+| `n_cpus` | accepted, ignored (one-time warn when non-`None`) | Single-process GPU/CPU pipeline. Use `device="cuda"` or `device="cpu"`. |
+
+<a name="chain-filter-semantics"></a>
+**Chain filter semantics (parser-level, 2026-05-21).** Both single-chain
+(`chain="A"`) and multi-chain (`chain=["A", "B"]`) runs route through
+`parse_pdb`'s `chains=` filter. Only the requested chains are read off
+the disk; burial density, decoys, native-pair enumeration, and emission
+all see only those chains. Consequence: `chain=["A", "B"]` and
+`chain="A"` then `chain="B"` produce **different** numeric values for
+the same chain-A residue, because the multi-chain run sees cross-chain
+contacts that influence rho. This matches the LAMMPS-AWSEM convention.
 
 Unknown kwargs raise `TypeError` — typos surface loudly.
 
@@ -303,8 +319,9 @@ to inspect individual terms or customise the pipeline.
 
 #### `parse_pdb`
 
-Parse a PDB to PyTorch tensors. See [parser.py](../src/parser.py) docstring
-for the full list of returned tensor keys.
+Parse a PDB to PyTorch tensors. See
+[parser.py](../frustration_gpu/parser.py) docstring for the full list
+of returned tensor keys.
 
 ```python
 parse_pdb(
@@ -583,10 +600,10 @@ Takes the parsed-PDB dict from `parse_pdb` (uses its `n_coords`, `ca_coords`,
 
 | Function | Returns | Source |
 |---|---|---|
-| `load_gamma_tables(...)` | `GammaTables` dataclass holding direct + mediated tables | `src/data/gamma.dat` |
-| `load_direct_gamma(...)` | direct gamma `(20, 20)` | `src/data/gamma.dat` (lines 1–20) |
-| `load_mediated_gamma(...)` | `(gamma_protein, gamma_water)`, each `(20, 20)` | `src/data/gamma.dat` (lines 21–60) |
-| `load_burial_gamma(...)` | burial gamma `(20, 3)` | `src/data/burial_gamma.dat` |
+| `load_gamma_tables(...)` | `GammaTables` dataclass holding direct + mediated tables | `frustration_gpu/data/gamma.dat` |
+| `load_direct_gamma(...)` | direct gamma `(20, 20)` | `frustration_gpu/data/gamma.dat` (rows 0–209, the 210 upper-triangle entries `C(21, 2)` over the 20 amino acids; symmetrized to a `(20, 20)` matrix) |
+| `load_mediated_gamma(...)` | `(gamma_protein, gamma_water)`, each `(20, 20)` | `frustration_gpu/data/gamma.dat` (rows 210–419, two columns: protein-mediated and water-mediated; each block is the same 210-row upper-triangle layout as `direct`) |
+| `load_burial_gamma(...)` | burial gamma `(20, 3)` | `frustration_gpu/data/burial_gamma.dat` |
 
 All four accept `device` and `dtype` kwargs and return tensors on the
 requested device. The decoy-driver level wraps these in `functools.lru_cache`

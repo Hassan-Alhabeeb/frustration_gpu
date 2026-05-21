@@ -1,7 +1,22 @@
-# Public-API Verification — `src.__init__` vs frustrapy
+# Public-API Verification — `frustration_gpu.__init__` vs frustrapy
+
+> **Historical snapshot — 2026-05-21.** This document is a one-shot
+> verification audit taken at the date stamped below. Some statements
+> here have been superseded by later changes in this same release
+> cycle. In particular:
+>
+> * The `calculate_frustration` adapter now accepts `overwrite` and
+>   `n_cpus` as no-op kwargs (was: "raises TypeError"). The drop-in
+>   surface is therefore complete for the frustrapy `0.1.1` signature.
+> * The package name was renamed from `src` to `frustration_gpu`;
+>   all `src/...` paths quoted below now live at `frustration_gpu/...`.
+>
+> For the current authoritative API contract see [API.md](API.md).
+> For the changelog of these post-audit fixes see
+> [`CHANGELOG.md`](../CHANGELOG.md).
 
 Final read-only audit, 2026-05-21. Covers the public surface exported from
-`src/__init__.py`, the drop-in `calculate_frustration` adapter, the
+`frustration_gpu/__init__.py`, the drop-in `calculate_frustration` adapter, the
 `FrustrationResult` dataclass, error messages, type hints, docstrings, and
 the public/private boundary.
 

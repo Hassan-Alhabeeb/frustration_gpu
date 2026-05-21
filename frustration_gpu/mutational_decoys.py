@@ -100,7 +100,13 @@ from __future__ import annotations
 
 import torch
 
-from ._contact_common import _build_chain_index, _resolve_contact_coords
+import warnings
+
+from ._contact_common import (
+    _build_chain_index,
+    _check_no_dna_sentinel,
+    _resolve_contact_coords,
+)
 from .decoys import (
     DEFAULT_CONTACT_CUTOFF_A,
     DEFAULT_N_DECOYS,
@@ -893,10 +899,29 @@ def mutational_decoy_stats(
     else:
         device = torch.device(device)
 
+    # Finding #22 — std requires n_decoys >= 2.
+    if int(n_decoys) < 2:
+        raise ValueError(
+            f"mutational_decoy_stats requires n_decoys >= 2 (got {n_decoys}); "
+            "std is undefined with a single decoy."
+        )
+
+    # Finding #10 — DNA sentinel guard at the public-API entry.
+    aa_native_raw = coords["residue_types"]
+    _check_no_dna_sentinel(aa_native_raw)
+
     if rho is None:
         rho = lammps_dump_rho(coords, device=device)
     rho = rho.to(device=device, dtype=dtype)
-    aa_native = coords["residue_types"].to(device=device, dtype=torch.int64)
+    aa_native = aa_native_raw.to(device=device, dtype=torch.int64)
+    n_residues = aa_native.shape[0]
+
+    # Finding #54 — rho shape must match N.
+    if rho.shape != (n_residues,):
+        raise ValueError(
+            f"rho shape {tuple(rho.shape)} does not match (N,) where "
+            f"N=len(coords['ca_coords'])={n_residues}."
+        )
 
     # --- enumerate native pairs --------------------------------------------
     pair_i, pair_j, r_ij_pair, _, dist_full, _same_chain = _enumerate_native_pairs(
@@ -908,6 +933,24 @@ def mutational_decoy_stats(
     dist_full = dist_full.to(dtype=dtype)
     r_ij_pair = r_ij_pair.to(dtype=dtype)
     n_pair = int(pair_i.numel())
+
+    # Finding #34 — bail out BEFORE expensive O(N²) precompute when there
+    # are zero native pairs. Earlier versions built T_alpha + native
+    # energies first and only short-circuited at the decoy step.
+    if n_pair == 0:
+        zero_pair = torch.zeros(0, dtype=dtype, device=device)
+        return {
+            "pair_i": pair_i,
+            "pair_j": pair_j,
+            "r_ij": r_ij_pair,
+            "rho_i": zero_pair,
+            "rho_j": zero_pair,
+            "E_native": zero_pair,
+            "decoy_mean": zero_pair,
+            "decoy_std": zero_pair,
+            "aa_i_dec": torch.zeros((0, n_decoys), dtype=torch.int64, device=device),
+            "aa_j_dec": torch.zeros((0, n_decoys), dtype=torch.int64, device=device),
+        }
 
     # --- gamma tables (cached) ---------------------------------------------
     device_str = str(device)
@@ -1065,6 +1108,16 @@ def mutational_decoy_stats(
 
     decoy_mean = E_decoy.mean(dim=1)
     decoy_std = E_decoy.std(dim=1, unbiased=False)
+
+    # Finding #22 — warn when any per-pair decoy std collapses to zero.
+    if bool((decoy_std == 0).any().item()):
+        n_collapsed = int((decoy_std == 0).sum().item())
+        warnings.warn(
+            f"mutational_decoy_stats: decoy_std == 0 for "
+            f"{n_collapsed}/{n_pair} pair(s); FI would be undefined there.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     return {
         "pair_i": pair_i,

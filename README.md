@@ -94,8 +94,8 @@ print(result.density_records.head())
 ## Status
 
 - Configurational, mutational, singleresidue modes: all three implemented and validated.
-- FI Spearman >= 0.9975 vs LAMMPS reference on 30/30 panel runs (lowest is 0.9975 on 3F9M singleresidue).
-- CPU <-> GPU agreement at machine precision: max \|delta-FI\| = 0.0 (literal) on all 30 reference combinations.
+- FI Spearman >= 0.9975 vs LAMMPS reference on the 10-PDB development panel (30/30 (PDB, mode) combos, lowest is 0.9975 on 3F9M singleresidue). The repo bundles the **4-PDB CI subset** (5AON, 11BG, 1O3S, 3F9M) needed to reproduce the bit-identity gates from a fresh clone; the full 10-PDB panel is reproducible by pointing `benchmark/run_phase5.py --pdb-dir <dir>` at the remaining six (PDB IDs in `VALIDATION.md`).
+- CPU <-> GPU agreement at machine precision on the bundled 4-PDB panel and the 10-PDB development panel. Rounded outputs (default `precision=3`) match exactly; high-precision FI values agree to ~1e-15 ULP drift driven by reduction-order differences in `decoy_mean` / `decoy_std`, which the FI quantile absorbs at the printed precision.
 - Drop-in `calculate_frustration(...)` alias for frustrapy users (`results_dir`, `graphics`, etc. accepted).
 - Multi-chain handling, chain filter, residue subset filter, opt-in Debye-Huckel electrostatics.
 - LAMMPS-compat flags (`include_dna`, `lammps_compat_altloc`) reproduce frustratometeR's 5adens output byte-comparable on protein-DNA and alt-conformer PDBs.
@@ -117,7 +117,7 @@ print(result.density_records.head())
 - For very small proteins (N < 100) CUDA launch overhead can make GPU slower than CPU; use `device="cpu"`.
 - One panel cell (5N9R mutational, N=356) shows GPU 33% slower than CPU. See VALIDATION.md section 7.
 - Large proteins (>5,000 residues) report a high VRAM allocator peak; alpha-chunking work in progress.
-- Sparse or fragmented structures can trip the rejection-sampler fallback and emit a `frustration_gpu.decoys` warning; FI Spearman is unaffected on dense structures but per-pair decoy stats may be noisier.
+- Sparse or fragmented structures: the configurational sampler now uses direct inverse-CDF sampling over the in-contact set (FIX-4, `frustration_gpu/decoys.py`). If a structure has zero in-contact pairs (highly fragmented or non-physical coords) the call raises a hard `RuntimeError` rather than silently emitting biased fallback samples. There is no rejection-sampler fallback warning in the current code path.
 
 ## Documentation
 

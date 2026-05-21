@@ -93,14 +93,22 @@ from __future__ import annotations
 
 import torch
 
+import math
+import warnings
+
 from ._contact_common import (
     ContactContext,
     SparseContactContext,
     _build_chain_index,
     _check_no_dna_sentinel,
+    _check_residue_types_in_range,
     _pair_mask,
     _pairwise_distance_safe,
     _resolve_contact_coords,
+    _validate_context_device,
+    _validate_context_fingerprint,
+    _warn_sparse_cutoff,
+    dh_sparse_min_safe,
 )
 
 # --- numerical constants ------------------------------------------------------
@@ -276,6 +284,23 @@ def debye_huckel_energy(
     # mistake (caller forgot to filter DNA) before any downstream code
     # silently makes biological nonsense look plausible.
     _check_no_dna_sentinel(coords["residue_types"])
+    # Finding #39 — also catch out-of-range positives.
+    _check_residue_types_in_range(coords["residue_types"])
+
+    # Finding #24 — validate the screening parameters. Zero or negative
+    # screening_length used to surface as a raw ZeroDivisionError /
+    # produce non-physical exponential growth respectively. Reject both up
+    # front with a clear ValueError.
+    if not math.isfinite(screening_length) or screening_length <= 0.0:
+        raise ValueError(
+            f"screening_length must be a finite positive value, got "
+            f"{screening_length}. Negative or zero values invert/blow up "
+            "the Debye-Hückel exponential decay."
+        )
+    if not math.isfinite(k_screening) or k_screening <= 0.0:
+        raise ValueError(
+            f"k_screening must be a finite positive value, got {k_screening}."
+        )
 
     # --- resolve device + coords ------------------------------------------
     ca = coords["ca_coords"]
@@ -285,6 +310,7 @@ def debye_huckel_energy(
         device = torch.device(device)
 
     # Opt sprint Idea 3 + Speed-3 Idea 1: dense or sparse context support.
+    # Finding #31 — reject cross-type _context cleanly.
     is_sparse_ctx = isinstance(_context, SparseContactContext)
     if sparse and not is_sparse_ctx:
         raise ValueError(
@@ -297,6 +323,24 @@ def debye_huckel_energy(
         )
 
     if _context is not None:
+        # Finding #11 — device-mismatch validation.
+        _validate_context_device(_context, device)
+        # Finding #30 — stale-context guard.
+        _validate_context_fingerprint(_context, coords)
+        # Finding #28 — warn loudly when sparse_cutoff is below the DH safe
+        # minimum (3 × screening_length). On 5AON, cutoff=11 SIGN-FLIPPED
+        # the DH energy from −0.60 to +0.15 kcal/mol — silent disaster.
+        if is_sparse_ctx:
+            _warn_sparse_cutoff(
+                "debye_huckel_energy",
+                _context,
+                dh_sparse_min_safe(screening_length, k_screening),
+                extra_advice=(
+                    "DH decays as exp(-r/λ); the minimum-safe cutoff is "
+                    "3 × screening_length / k_screening "
+                    f"(here = {dh_sparse_min_safe(screening_length, k_screening):.1f} Å)."
+                ),
+            )
         cb_or_ca = _context.cb_or_ca
         dtype = _context.dtype
         n = _context.n
@@ -372,11 +416,13 @@ def debye_huckel_energy(
         pair_energy_upper[pair_i, pair_j] = pair_energy_1d
         pair_mask_full = torch.zeros((n, n), dtype=torch.bool, device=device)
         pair_mask_full[pair_i, pair_j] = mask_1d
+        # Finding #42 — sparse context no longer caches dense distances.
+        # Fall back to the 1-D per-pair distance tensor.
         return {
             "energy": total,
             "pair_energy": pair_energy_upper,
             "pair_mask": pair_mask_full,
-            "distances": ctx.dist,
+            "distances": ctx.dist if ctx.dist is not None else r_pair,
             "charges": q,
         }
 
@@ -466,15 +512,44 @@ def debye_huckel_pair_energy(
     is responsible for supplying a "valid" pair. If either AA is not in
     ``{R, K, D, E}`` (charge 0) the return is exactly 0.0.
 
+    Findings #39 / #58 / #24 — validate inputs:
+    * ``aa_i, aa_j`` must lie in ``[0, 20)``.
+    * ``r_ij`` must be finite and strictly positive (zero or negative
+      distances are unphysical for the 1/r Coulomb factor and used to
+      silently return ±inf or a finite wrong-sign number).
+    * ``screening_length`` and ``k_screening`` must be finite positive.
+
     Mirrors ``fix_backbone.cpp:5502-5547`` faithfully — the reference path
     against which the dense :func:`debye_huckel_energy` is validated.
     """
+    # Finding #39 — clamp to [0, 20).
+    if not (0 <= int(aa_i) < 20):
+        raise ValueError(f"aa_i must lie in [0, 20), got {int(aa_i)}.")
+    if not (0 <= int(aa_j) < 20):
+        raise ValueError(f"aa_j must lie in [0, 20), got {int(aa_j)}.")
+    # Finding #24 — screening params validated up front.
+    if not math.isfinite(screening_length) or screening_length <= 0.0:
+        raise ValueError(
+            f"screening_length must be finite positive, got {screening_length}."
+        )
+    if not math.isfinite(k_screening) or k_screening <= 0.0:
+        raise ValueError(
+            f"k_screening must be finite positive, got {k_screening}."
+        )
     qvec = aa_charge_vector(device=device, dtype=dtype)
     q_i = qvec[aa_i].item()
     q_j = qvec[aa_j].item()
     if q_i == 0.0 or q_j == 0.0:
         return torch.zeros((), dtype=dtype, device=device)
     r = torch.as_tensor(r_ij, dtype=dtype, device=device)
+    # Finding #58 — validate r_ij is finite and strictly positive.
+    if not bool(torch.isfinite(r).all()):
+        raise ValueError(f"r_ij must be finite, got {float(r):g}.")
+    if float(r) <= 0.0:
+        raise ValueError(
+            f"r_ij must be strictly positive for the Coulomb 1/r factor, "
+            f"got {float(r):g}."
+        )
     inv_lambda_eff = torch.as_tensor(
         k_screening / screening_length, dtype=dtype, device=device
     )

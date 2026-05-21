@@ -140,6 +140,38 @@ def compute_residue_density(
     ca = coords["ca_coords"]
     device = ca.device
     dtype = ca.dtype if ca.dtype.is_floating_point else torch.float64
+    n_res = int(ca.shape[0])
+
+    # QA-MISC #27 & #52: validate input shapes and content before any work.
+    # Previously this function silently broadcast a too-short ``fi`` across
+    # all pair midpoints (or zip-truncated against ``pair_i``), and negative
+    # ``pair_i`` / ``pair_j`` would wrap silently via advanced indexing into
+    # the coord tensor — producing nonsense distances with no warning.
+    n_pair_i = int(pair_i.numel())
+    n_pair_j = int(pair_j.numel())
+    n_fi = int(fi.numel())
+    if n_pair_i != n_pair_j or n_pair_i != n_fi:
+        raise ValueError(
+            "compute_residue_density: pair_i, pair_j, fi must all have the "
+            f"same length; got pair_i={n_pair_i}, pair_j={n_pair_j}, fi={n_fi}."
+        )
+    if n_pair_i > 0:
+        pi_min = int(pair_i.min().item())
+        pi_max = int(pair_i.max().item())
+        pj_min = int(pair_j.min().item())
+        pj_max = int(pair_j.max().item())
+        if pi_min < 0 or pi_max >= n_res or pj_min < 0 or pj_max >= n_res:
+            raise ValueError(
+                f"compute_residue_density: pair indices out of range [0, {n_res}); "
+                f"pair_i range [{pi_min}, {pi_max}], pair_j range [{pj_min}, {pj_max}]."
+            )
+    if n_fi > 0 and not bool(torch.isfinite(fi).all()):
+        n_bad = int((~torch.isfinite(fi)).sum().item())
+        raise ValueError(
+            f"compute_residue_density: {n_bad} of {n_fi} frustration indices "
+            "are non-finite (NaN or inf). Classifying them as 'neutral' "
+            "silently would bias the per-residue counts."
+        )
 
     # Match the LAMMPS dump's coordinate choice: CB for non-Gly, CA for Gly.
     xb = _xb_coords(coords).to(dtype=dtype)                         # (N, 3)

@@ -40,6 +40,8 @@ see PHASE_1_STATUS.md.
 """
 from __future__ import annotations
 
+import math
+
 import torch
 
 from ._contact_common import _check_no_dna_sentinel
@@ -119,6 +121,20 @@ def compute_rho(
     dtype = coords_nm.dtype
     n = coords_nm.shape[0]
 
+    # QA-MISC #48: validate residue_numbers / chain_index shape against coords.
+    # Negative indices would otherwise wrap silently in advanced indexing; a
+    # shape mismatch would produce surprising broadcasting in the (N, N) masks.
+    if residue_numbers.shape != (n,):
+        raise ValueError(
+            f"residue_numbers must have shape ({n},) matching coords, "
+            f"got {tuple(residue_numbers.shape)}"
+        )
+    if chain_index.shape != (n,):
+        raise ValueError(
+            f"chain_index must have shape ({n},) matching coords, "
+            f"got {tuple(chain_index.shape)}"
+        )
+
     # Convert constants. eta has units nm^-1; r_min/r_max are in nm.
     eta = torch.tensor(eta_per_nm, dtype=dtype, device=device)
     r_min = torch.tensor(r_min_nm, dtype=dtype, device=device)
@@ -133,7 +149,19 @@ def compute_rho(
         # `.sum(dim=1)` reduction. The (N, N) tensor is a single allocation;
         # the {contrib_1d, r_pair, ...} intermediates remain 1-D, so the
         # peak transient memory still scales with N_pair, not N².
-        cutoff_nm = float(sparse_cutoff_a) * 0.1
+        # Finding #56 — validate sparse_cutoff_a is finite positive. The
+        # legacy path did no checking; NaN / inf / non-positive values
+        # silently produced all-zero rho without an error.
+        cutoff_a_f = float(sparse_cutoff_a)
+        if not math.isfinite(cutoff_a_f):
+            raise ValueError(
+                f"sparse_cutoff_a must be finite positive, got {cutoff_a_f}."
+            )
+        if cutoff_a_f <= 0.0:
+            raise ValueError(
+                f"sparse_cutoff_a must be > 0, got {cutoff_a_f}."
+            )
+        cutoff_nm = cutoff_a_f * 0.1
         with torch.no_grad():
             diff_scan = coords_nm.unsqueeze(0) - coords_nm.unsqueeze(1)
             dist_scan = torch.linalg.vector_norm(diff_scan, dim=-1)
@@ -175,13 +203,20 @@ def compute_rho(
         return rho
 
     # ---- Dense path (default behaviour) -------------------------------
-    # Pairwise distance, shape (N, N). NaN-safe: any pair involving a NaN row
-    # comes out NaN, which we mask out via the validity mask below.
-    diff = coords_nm.unsqueeze(0) - coords_nm.unsqueeze(1)
-    dist = torch.linalg.vector_norm(diff, dim=-1)
+    # QA-MISC #3: autograd-NaN-safe pairwise distance via the "double-where"
+    # trick (mirrors `_contact_common._pairwise_distance_safe`). Building the
+    # distance from raw NaN-bearing coords poisons the backward graph because
+    # `vector_norm`'s gradient evaluates `diff / norm`, and `0 * NaN == NaN`.
+    # We first replace NaN rows with a far-away finite filler, take the norm
+    # of the SAFE coords, and only then mask out invalid pairs at the end.
+    valid_row = torch.isfinite(coords_nm).all(dim=-1)                  # (N,)
+    decoy = torch.full_like(coords_nm, 1.0e6)
+    safe_coords = torch.where(
+        valid_row.unsqueeze(-1), coords_nm, decoy
+    )                                                                  # (N, 3)
+    diff = safe_coords.unsqueeze(0) - safe_coords.unsqueeze(1)
+    safe_dist_raw = torch.linalg.vector_norm(diff, dim=-1)             # (N, N), all finite
 
-    # Valid mask: both rows finite (i.e. CB present, or CA fallback).
-    valid_row = torch.isfinite(coords_nm).all(dim=-1)        # (N,)
     valid_pair = valid_row.unsqueeze(0) & valid_row.unsqueeze(1)
 
     # Sequence-separation mask. Within a chain, require |dr| > min_seq_sep.
@@ -196,9 +231,11 @@ def compute_rho(
     mask = valid_pair & seq_ok & ~diag
 
     # OpenAWSEM rho expression: 0.25 * (1 + tanh(eta*(r - r_min))) * (1 + tanh(eta*(r_max - r)))
-    # Where the pair is masked out, replace dist with a value that makes the
-    # contribution 0 (we just zero the pair contribution explicitly below).
-    safe_dist = torch.where(mask, dist, torch.zeros_like(dist))
+    # Apply the mask in two stages: first replace masked-out distances with
+    # a benign value (zeros) for the tanh inputs, then zero the contributions
+    # again at the end (defensive — at r=0 the tanh product is small but
+    # nonzero, so the final `torch.where` is what guarantees zero contrib).
+    safe_dist = torch.where(mask, safe_dist_raw, torch.zeros_like(safe_dist_raw))
     contrib = 0.25 * (1.0 + torch.tanh(eta * (safe_dist - r_min))) \
                   * (1.0 + torch.tanh(eta * (r_max - safe_dist)))
     contrib = torch.where(mask, contrib, torch.zeros_like(contrib))
@@ -245,6 +282,14 @@ def burial_density(
         Defaults to ``9.5`` — same as the mediated-shell cutoff so a single
         SparseContactContext could be reused (when wired through the driver).
     """
+    # QA-MISC #41: DNA-sentinel guard. Residues of type ``-1`` are DNA
+    # placeholders inserted by the parser when ``include_dna=True``. Letting
+    # them through computes a meaningless rho on coords that aren't even
+    # protein CA/CB. Match the contact-term convention: raise loudly so the
+    # caller filters via ``_subset_protein_only`` or uses ``compute_frustration``.
+    if "residue_types" in parsed:
+        _check_no_dna_sentinel(parsed["residue_types"])
+
     coords = _resolve_density_coords(parsed)              # (N, 3) angstrom
     device = coords.device
     n = coords.shape[0]

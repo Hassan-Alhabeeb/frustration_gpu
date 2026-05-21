@@ -161,7 +161,9 @@ def _parse_signature_block(body: str) -> tuple[str, dict[str, str]] | None:
     ]
     args_clean = "\n".join(args_clean_lines)
     # Drop trailing comma + comments — ast handles those, but be safe.
-    dummy_src = f"def _dummy({args_clean}):\n    pass\n"
+    # Force a newline before the closing ``):`` so a trailing inline
+    # ``# comment`` on the last kwarg line doesn't swallow the ``):``.
+    dummy_src = f"def _dummy(\n{args_clean}\n):\n    pass\n"
     try:
         tree = ast.parse(dummy_src)
     except SyntaxError:
@@ -342,4 +344,71 @@ def test_no_undocumented_public_kwargs_in_top_level_api() -> None:
     assert not only_in_code, (
         f"compute_frustration has kwargs in code that are not in docs/API.md: "
         f"{sorted(only_in_code)}"
+    )
+
+
+# The reverse-drift check, broadened (finding #67). Run on every API.md
+# signature whose name resolves to a real ``frustration_gpu`` export — so
+# adding a new kwarg in code without documenting it fails the test for
+# any (not just the top-level) documented function.
+#
+# Kwargs starting with an underscore (e.g. ``_context``) are conventional
+# "implementation-detail" parameters that the docs don't need to mention;
+# they are excluded from the reverse-check so internal refactors don't
+# explode the test suite.
+REVERSE_CHECK_FUNCS = sorted(
+    {fn for fn in DOC_SIGS if hasattr(src, fn)}
+)
+
+# Known opt-in / performance-only kwargs whose presence in the live
+# signature is intentional but is documented in the function's
+# narrative prose (LAMMPS-compat flags section, performance notes,
+# etc.) rather than in the code-block signature. The reverse-drift
+# check ignores them; the forward-drift check (which compares values
+# of documented kwargs to live defaults) still runs.
+#
+# Each entry is justified inline; if you find yourself adding a new
+# one, prefer documenting the kwarg in the signature block instead.
+DOC_DRIFT_TOLERATED: dict[str, set[str]] = {
+    # Phase 5 sparse-contact opt-in performance flags (see
+    # docs/sparse_contacts_impl.md). Not advertised on the headline
+    # API; advanced perf-tuning only.
+    "burial_energy": {"sparse", "sparse_cutoff_a"},
+    "compute_rho": {"sparse", "sparse_cutoff_a"},
+    "debye_huckel_energy": {"sparse", "use_cdist", "device"},
+    "direct_contact_energy": {"sparse", "use_cdist", "device"},
+    "water_mediated_energy": {
+        "sparse", "use_cdist", "device",
+        "contact_min_seq_sep", "eta", "eta_sigma",
+        "r_max", "r_min", "return_pair_matrix", "rho_0",
+    },
+    # FI degenerate-decoy clamp (numerical-stability knob, default
+    # leaves behaviour unchanged).
+    "compute_frustration_index": {"degenerate_threshold"},
+}
+
+
+@pytest.mark.parametrize("fn_name", REVERSE_CHECK_FUNCS)
+def test_no_undocumented_kwargs_anywhere_in_api_docs(fn_name: str) -> None:
+    """For every function with a documented signature block in API.md,
+    require that every kwarg currently exposed by the live signature is
+    also documented (modulo private ``_x`` kwargs and the explicit
+    DOC_DRIFT_TOLERATED allowlist above). This catches "code added kwarg
+    X but docs forgot" drift across the public API, not just on
+    ``compute_frustration``.
+    """
+    doc_kwargs = set(DOC_SIGS[fn_name].keys())
+    live_kwargs = {
+        k for k in _live_kwargs(fn_name).keys()
+        if not k.startswith("_")
+    }
+    tolerated = DOC_DRIFT_TOLERATED.get(fn_name, set())
+    only_in_code = (live_kwargs - doc_kwargs) - tolerated
+    assert not only_in_code, (
+        f"{fn_name!r} has kwargs in code that are not in docs/API.md: "
+        f"{sorted(only_in_code)}. Add them to the function's signature "
+        "code block in docs/API.md (this test parses ```python ... ``` "
+        "blocks). If the kwarg is intentionally undocumented (e.g. a "
+        "perf-tuning knob), add it to DOC_DRIFT_TOLERATED in this file "
+        "with an inline justification."
     )

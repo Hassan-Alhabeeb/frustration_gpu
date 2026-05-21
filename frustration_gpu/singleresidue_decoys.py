@@ -66,6 +66,8 @@ from ._contact_common import (
     ContactContext,
     _build_chain_index,
     _resolve_contact_coords,
+    _validate_context_device,
+    _validate_context_fingerprint,
 )
 from .decoys import (
     DEFAULT_CONTACT_CUTOFF_A,
@@ -83,14 +85,18 @@ from .decoys import (
     _dtype_to_str,
     lammps_dump_rho,
 )
+from ._contact_common import _check_no_dna_sentinel
 from .mutational_decoys import (
     PAIR_MIN_SEQ_SEP,
     _burial_residue_energy,
     _choose_alpha_chunk,
     _water_per_alpha_fused,
+    _water_per_alpha_fused_sum,
     _water_rho_terms,
 )
 from .parameters import BURIAL_KAPPA, BURIAL_RHO_MAX, BURIAL_RHO_MIN
+
+import warnings
 
 # ---------------------------------------------------------------------------
 # Precompute W_sr[i, α]: per-anchor per-alphabet contact-energy sum
@@ -152,6 +158,21 @@ def _precompute_W_sr(
         # Opt sprint #2 (GPU): fused (20, N, N) tensor in one shot
         # (α-chunked when memory tight).
         alpha_chunk = _choose_alpha_chunk(n, device, dtype)
+        # Bug #1 fix (OOM on large N): when chunking is required, route
+        # through the sum-variant which never materialises the (20, N, N)
+        # cube. Peak working memory drops to (chunk, N, N) + (20, N).
+        # Mirrors mutational mode's `_precompute_T_alpha` strategy.
+        if alpha_chunk > 0 and alpha_chunk < 20:
+            T_t = _water_per_alpha_fused_sum(
+                theta_direct_m, theta_med_m, sigma_wat, sigma_prot,
+                aa_native,
+                gamma_direct, gamma_med_prot, gamma_med_wat,
+                k_water,
+                alpha_chunk_size=alpha_chunk,
+            )  # (20, N)
+            W_sr = T_t.transpose(0, 1).contiguous()  # (N, 20)
+            return W_sr
+
         w_all = _water_per_alpha_fused(
             theta_direct_m, theta_med_m, sigma_wat, sigma_prot,
             aa_native,
@@ -281,11 +302,32 @@ def singleresidue_decoy_stats(
     else:
         device = torch.device(device)
 
+    # Finding #22 — singleresidue needs n_decoys >= 2 to compute std.
+    if int(n_decoys) < 2:
+        raise ValueError(
+            f"singleresidue_decoy_stats requires n_decoys >= 2 (got {n_decoys}); "
+            "std is undefined with a single decoy and FI would be silently zero."
+        )
+
+    # Finding #10 — DNA sentinel guard at the public-API entry. Lower-level
+    # energy APIs already check this; decoys must too because negative
+    # indices into the (20, 20) γ / (20, 3) burial tables silently wrap.
+    aa_native_raw = coords["residue_types"]
+    _check_no_dna_sentinel(aa_native_raw)
+
     if rho is None:
         rho = lammps_dump_rho(coords, device=device)
     rho = rho.to(device=device, dtype=dtype)
-    aa_native = coords["residue_types"].to(device=device, dtype=torch.int64)
+    aa_native = aa_native_raw.to(device=device, dtype=torch.int64)
     n = aa_native.shape[0]
+
+    # Finding #54 — validate rho shape against the residue count derived
+    # from coords; a mismatched rho silently broadcasts.
+    if rho.shape != (n,):
+        raise ValueError(
+            f"rho shape {tuple(rho.shape)} does not match (N,) where "
+            f"N=len(coords['ca_coords'])={n}."
+        )
 
     # --- build (N, N) distance matrix + contact mask -----------------------
     # Speed-fix4 SPEED-2 Idea 2: re-use ``_context.dist_full`` when the caller
@@ -295,6 +337,15 @@ def singleresidue_decoy_stats(
     chain_idx = _build_chain_index(coords["chain_ids"], device=device)
     finite_row = torch.isfinite(cb_or_ca).all(dim=-1, keepdim=True)
     finite_pair_2d = finite_row.expand(n, n) & finite_row.transpose(0, 1).expand(n, n)
+
+    # Finding #30 — fingerprint guard. Without this check, a caller can build
+    # a context from structure A and feed coords from structure B; the cached
+    # `_context.dist_full` would silently mix with the new coords. Mirror the
+    # direct/water/DH energy modules' pattern: validate device first, then
+    # fingerprint, before consuming any cached tensor.
+    if _context is not None:
+        _validate_context_device(_context, device)
+        _validate_context_fingerprint(_context, coords)
 
     if _context is not None and _context.dist_full is not None:
         dist_full = _context.dist_full.to(dtype=dtype)
@@ -395,6 +446,18 @@ def singleresidue_decoy_stats(
 
     decoy_mean = E_decoy.mean(dim=1)
     decoy_std = E_decoy.std(dim=1, unbiased=False)
+
+    # Finding #22 — emit a warning when the per-residue decoy std collapses
+    # for ANY residue (FI is zero by construction at those slots).
+    if bool((decoy_std == 0).any().item()):
+        n_collapsed = int((decoy_std == 0).sum().item())
+        warnings.warn(
+            f"singleresidue_decoy_stats: decoy_std == 0 for {n_collapsed}/{n} "
+            "residue(s); FI forced to 0 there. Likely n_decoys too small or "
+            "the residue has no contacts.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     # FI = (mean - native) / std; guard division by zero
     safe_std = torch.where(decoy_std > 0, decoy_std, torch.ones_like(decoy_std))

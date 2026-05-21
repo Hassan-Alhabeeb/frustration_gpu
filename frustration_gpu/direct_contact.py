@@ -121,13 +121,18 @@ import warnings
 import torch
 
 from ._contact_common import (
+    DIRECT_SPARSE_MIN_SAFE_A,
     ContactContext,
     SparseContactContext,
     _build_chain_index,
     _check_no_dna_sentinel,
+    _check_residue_types_in_range,
     _pair_mask,
     _pairwise_distance_safe,
     _resolve_contact_coords,
+    _validate_context_device,
+    _validate_context_fingerprint,
+    _warn_sparse_cutoff,
 )
 from .contact_gamma import load_direct_gamma
 
@@ -204,7 +209,18 @@ def direct_contact_energy(
         When ``return_pair_matrix=True`` AND ``sparse=True``, the dense
         ``(N, N)`` ``pair_energy``/``pair_mask`` matrices are reconstructed
         from the sparse pair list at no precision cost — that's the only
-        way to keep the dict API stable.
+        way to keep the dict API stable. (Note: the sparse context no
+        longer caches a dense ``distances`` matrix — finding #42 —so the
+        ``distances`` entry in the returned dict is ``None`` in sparse +
+        return_pair_matrix mode. Use the dense path when you need it.)
+
+        **Min-safe sparse_cutoff for the direct term: 7.5 Å.** The direct
+        well's nominal r_max is 6.5 Å, but the tanh-shoulder tail is non-
+        negligible out to ~7.5 Å. Using a smaller cutoff (e.g. 6.5 Å)
+        produces a material drift versus dense — on 5AON, cutoff=6.5 Å
+        gave −2.043 kcal/mol vs the dense −2.554 (Δ = 0.51 kcal/mol).
+        A ``UserWarning`` is emitted when the context's ``sparse_cutoff``
+        is below 7.5 Å. Finding #47.
     use_cdist : bool
         Speed-sprint #3 Idea 2. If ``True`` use :func:`torch.cdist` in the
         distance build, dropping the ``(N, N, 3)`` ``diff`` intermediate.
@@ -254,6 +270,10 @@ def direct_contact_energy(
     # ``compute_frustration`` filters DNA out before reaching here; this
     # guard fires for direct callers of the lower-level energy API.
     _check_no_dna_sentinel(coords["residue_types"])
+    # Finding #39 — also catch out-of-range positives (>= 20) up front with
+    # a clear error instead of letting them surface as a raw IndexError
+    # inside the gamma gather.
+    _check_residue_types_in_range(coords["residue_types"])
 
     # --- resolve device + coords ------------------------------------------
     ca = coords["ca_coords"]
@@ -264,6 +284,8 @@ def direct_contact_energy(
 
     # Opt sprint Idea 3 + Speed-3 Idea 1: reuse the shared scaffolding
     # (dense or sparse) when caller supplies one.
+    # Finding #31 — reject the cross-type _context cleanly with a ValueError
+    # instead of letting downstream code raise an obscure AttributeError.
     is_sparse_ctx = isinstance(_context, SparseContactContext)
     if sparse and not is_sparse_ctx:
         raise ValueError(
@@ -277,6 +299,19 @@ def direct_contact_energy(
         )
 
     if _context is not None:
+        # Finding #11 — fail loudly on device mismatch instead of dying in
+        # an opaque cross-device kernel call.
+        _validate_context_device(_context, device)
+        # Finding #30 — refuse a stale ContactContext where the cached
+        # geometry doesn't match the current coords tensor.
+        _validate_context_fingerprint(_context, coords)
+        # Finding #28 / #47 — warn loudly when the cutoff is too tight.
+        if is_sparse_ctx:
+            _warn_sparse_cutoff(
+                "direct_contact_energy",
+                _context,
+                DIRECT_SPARSE_MIN_SAFE_A,
+            )
         cb_or_ca = _context.cb_or_ca
         dtype = _context.dtype
         n = _context.n
@@ -382,11 +417,14 @@ def direct_contact_energy(
         pair_energy_upper[pair_i, pair_j] = pair_energy_1d
         pair_mask_full = torch.zeros((n, n), dtype=torch.bool, device=device)
         pair_mask_full[pair_i, pair_j] = pair_mask_sep
+        # Finding #42 — sparse context no longer caches the full (N, N)
+        # distance matrix. Callers wanting `distances` should use the dense
+        # path. We return the 1-D per-pair distances as a stable fallback.
         return {
             "energy": total,
             "pair_energy": pair_energy_upper,
             "pair_mask": pair_mask_full,
-            "distances": ctx.dist,
+            "distances": ctx.dist if ctx.dist is not None else r_pair,
         }
 
     # ---- Dense path (original behaviour, with optional cdist) ----------
@@ -456,15 +494,54 @@ def direct_pair_energy(
     hand-computed pair-level validation. No sequence-separation logic (callers
     supply only valid pairs).
 
+    Findings #39 / #57 — validate inputs:
+    * ``aa_i, aa_j`` must lie in ``[0, 20)`` (canonical AWSEM amino-acid
+      index). Negative DNA-sentinel values and out-of-range positives are
+      rejected with a clear ``ValueError`` instead of silent Python wrap.
+    * ``gamma_direct`` (when supplied) must have shape ``(20, 20)``.
+    * ``r_ij`` must be a finite non-negative scalar (``r_ij == 0`` is
+      pathologically large but defined; it is allowed to keep symmetry with
+      the dense path's safe_dist fill).
+
     Returns a 0-d tensor in kcal/mol.
     """
+    if not (0 <= int(aa_i) < 20):
+        raise ValueError(
+            f"aa_i must lie in [0, 20), got {int(aa_i)}. "
+            "Negative values (DNA sentinel) and >=20 (out-of-range) are rejected."
+        )
+    if not (0 <= int(aa_j) < 20):
+        raise ValueError(
+            f"aa_j must lie in [0, 20), got {int(aa_j)}. "
+            "Negative values (DNA sentinel) and >=20 (out-of-range) are rejected."
+        )
     if gamma_direct is None:
         gamma_direct = load_direct_gamma(device=device, dtype=dtype)
     else:
+        # Finding #57 — validate shape BEFORE indexing.
+        if tuple(gamma_direct.shape) != (20, 20):
+            raise ValueError(
+                f"gamma_direct must have shape (20, 20), got "
+                f"{tuple(gamma_direct.shape)}."
+            )
+        # Finding #57 (audit-fix follow-up) — also reject NaN/inf values.
+        # A NaN-filled gamma table previously passed shape validation and
+        # silently propagated NaN through every downstream energy.
+        if not bool(torch.isfinite(gamma_direct).all()):
+            raise ValueError(
+                "gamma_direct contains non-finite values (NaN or inf). "
+                "Re-load the table or sanitise upstream — silent NaN "
+                "propagation would poison every dependent energy."
+            )
         gamma_direct = gamma_direct.to(dtype=dtype)
         if device is not None:
             gamma_direct = gamma_direct.to(device=device)
     r = torch.as_tensor(r_ij, dtype=dtype, device=gamma_direct.device)
+    # Finding #57/#58 — validate r_ij is finite and non-negative.
+    if not bool(torch.isfinite(r).all()):
+        raise ValueError(f"r_ij must be finite, got {float(r):g}")
+    if float(r) < 0.0:
+        raise ValueError(f"r_ij must be non-negative, got {float(r):g}")
     eta_t = torch.as_tensor(eta, dtype=dtype, device=gamma_direct.device)
     r_min_t = torch.as_tensor(r_min, dtype=dtype, device=gamma_direct.device)
     r_max_t = torch.as_tensor(r_max, dtype=dtype, device=gamma_direct.device)

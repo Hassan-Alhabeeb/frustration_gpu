@@ -95,15 +95,26 @@ def load_burial_gamma(
     path = _burial_gamma_dat_path()
     rows: list[list[float]] = []
     with path.open("r") as fh:
-        for line in fh:
+        for lineno, line in enumerate(fh, start=1):
             parts = line.split()
+            if not parts:
+                continue
             if len(parts) != 3:
-                if not parts:
-                    continue
                 raise ValueError(
-                    f"burial_gamma.dat: expected 3 columns, got {len(parts)} in line: {line!r}"
+                    f"burial_gamma.dat:{lineno}: expected 3 columns, got "
+                    f"{len(parts)} in line: {line!r}"
                 )
-            rows.append([float(x) for x in parts])
+            row = [float(x) for x in parts]
+            # QA-MISC #49: reject NaN / inf in parameter values. A typo'd
+            # parameter file would otherwise propagate silently through the
+            # burial energy as ``NaN`` or ``inf``.
+            for v in row:
+                if not (v == v) or v in (float("inf"), float("-inf")):
+                    raise ValueError(
+                        f"burial_gamma.dat:{lineno}: non-finite value {v!r} "
+                        "in parameter table"
+                    )
+            rows.append(row)
     if len(rows) != 20:
         raise ValueError(f"burial_gamma.dat: expected 20 rows, got {len(rows)}")
     return torch.tensor(rows, dtype=dtype, device=device)
@@ -124,16 +135,33 @@ def load_gamma_tables(
     """
     path = _gamma_dat_path()
     raw: list[list[float]] = []
+    # QA-MISC #32: previous loader accepted 1-column lines (silently duplicating
+    # the value across both columns) and accepted >420-row files (silently
+    # ignoring the extras). Both modes hid file corruption. Be strict:
+    # require exactly 2 numeric columns per non-blank line and exactly 420
+    # data rows total.
     with path.open("r") as fh:
-        for line in fh:
+        for lineno, line in enumerate(fh, start=1):
             parts = line.split()
-            if len(parts) >= 2:
-                raw.append([float(parts[0]), float(parts[1])])
-            elif len(parts) == 1:
-                raw.append([float(parts[0]), float(parts[0])])
-    if len(raw) < 420:
+            if not parts:
+                continue
+            if len(parts) != 2:
+                raise ValueError(
+                    f"gamma.dat:{lineno}: expected 2 columns, got {len(parts)} "
+                    f"in line: {line!r}"
+                )
+            row = [float(parts[0]), float(parts[1])]
+            # QA-MISC #49: reject NaN / inf.
+            for v in row:
+                if not (v == v) or v in (float("inf"), float("-inf")):
+                    raise ValueError(
+                        f"gamma.dat:{lineno}: non-finite value {v!r} in "
+                        "parameter table"
+                    )
+            raw.append(row)
+    if len(raw) != 420:
         raise ValueError(
-            f"gamma.dat too short: {len(raw)} rows (expected at least 420)"
+            f"gamma.dat: expected exactly 420 data rows, got {len(raw)}"
         )
 
     direct_block = raw[:210]
