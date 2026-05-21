@@ -1,0 +1,110 @@
+[build-system]
+requires = ["setuptools >= 65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frustration-gpu"
+version = "0.1.0"
+description = "Pure-PyTorch reimplementation of LAMMPS-AWSEM frustration analysis (Wolynes-lab AWSEM Hamiltonian + Ferreiro frustration index), GPU-accelerated."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Hassan Alhabeeb" },
+]
+keywords = [
+    "frustration",
+    "AWSEM",
+    "protein",
+    "allosteric",
+    "GPU",
+    "PyTorch",
+    "structural-biology",
+    "biophysics",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+dependencies = [
+    "torch >= 2.0",
+    "numpy >= 1.24",
+    "pandas >= 1.5",
+    "biopython >= 1.81",
+]
+
+[project.optional-dependencies]
+cuda = [
+    # User should install the CUDA-enabled torch wheel matching their toolkit
+    # via the official PyTorch index; this extra is a placeholder marker for
+    # docs / CI matrices.
+    "torch >= 2.0",
+]
+dev = [
+    "pytest >= 7.0",
+    "pytest-xdist >= 3.0",
+    "ruff >= 0.1.0",
+    "black >= 23.0",
+]
+viz = [
+    "matplotlib >= 3.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/Hassan-Alhabeeb/frustration_gpu"
+Repository = "https://github.com/Hassan-Alhabeeb/frustration_gpu"
+Issues = "https://github.com/Hassan-Alhabeeb/frustration_gpu/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["frustration_gpu*"]
+
+[tool.setuptools.package-data]
+frustration_gpu = ["data/*.dat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+filterwarnings = [
+    "error::UserWarning",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+markers = [
+    "slow: marks tests that take more than a few seconds",
+    "gpu: marks tests that require a CUDA device",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length handled by formatter
+    "B008",  # function call in default argument (fine for tensors)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"examples/*" = ["E402", "F401"]

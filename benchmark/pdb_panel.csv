@@ -1,0 +1,21 @@
+rank,pdb_id,actual_residues,frust_cache_path,source,notes
+1,5AON,49,allosteric/features/frustration/5AON_frust.npz,size-diversity,
+2,1O3S,200,allosteric/features/frustration/1O3S_frust.npz,size-diversity,
+3,6EQJ,245,allosteric/features/frustration/6EQJ_frust.npz,size-diversity,
+4,11BG,248,allosteric/features/frustration/11BG_frust.npz,prospective-hit,small benchmark (124 res)
+5,2HE7,283,allosteric/features/frustration/2HE7_frust.npz,size-diversity,
+6,5U2H,307,allosteric/features/frustration/5U2H_frust.npz,size-diversity,
+7,3IJG,342,allosteric/features/frustration/3IJG_frust.npz,size-diversity,
+8,5N9R,356,allosteric/features/frustration/5N9R_frust.npz,prospective-hit,"USP7, prospective hit (meeting brief)"
+9,3NQS,412,allosteric/features/frustration/3NQS_frust.npz,size-diversity,
+10,3F9M,451,allosteric/features/frustration/3F9M_frust.npz,prospective-hit,"Glucokinase, v44+priors test"
+11,2V8Q,479,allosteric/features/frustration/2V8Q_frust.npz,size-diversity,
+12,3H6V,521,allosteric/features/frustration/3H6V_frust.npz,size-diversity,
+13,4C8B,560,allosteric/features/frustration/4C8B_frust.npz,prospective-hit,"RIPK2, F158/F90 prospective"
+14,7KAY,583,allosteric/features/frustration/7KAY_frust.npz,size-diversity,
+15,3IUN,672,allosteric/features/frustration/3IUN_frust.npz,size-diversity,
+16,4HON,675,allosteric/features/frustration/4HON_frust.npz,prospective-hit,"KDM4D, H189/E191 prospective"
+17,2SKE,830,allosteric/features/frustration/2SKE_frust.npz,size-diversity,
+18,1OS2,990,allosteric/features/frustration/1OS2_frust.npz,size-diversity,
+19,6F56,1528,allosteric/features/frustration/6F56_frust.npz,size-diversity,
+20,4PKN,8689,allosteric/features/frustration/4PKN_frust.npz,size-diversity,

@@ -1,0 +1,78 @@
+# --- Python bytecode / packaging ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.Python
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+
+# --- Test / lint / type caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+.hypothesis/
+coverage.xml
+*.cover
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+.env
+.envrc
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- PyTorch / model artifacts ---
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# --- Project-specific scratch ---
+# Keep `benchmark/cpu_baseline/` (reference dumps) and `benchmark/pdb_panel.csv`
+# under version control; ignore only ad-hoc result CSVs / .npz dumps placed
+# at the benchmark root that aren't the curated reference data.
+benchmark/*.csv
+!benchmark/pdb_panel.csv
+benchmark/gpu_outputs/
+benchmark/*.npz
+benchmark/_*
+
+# Scratch / spike files at repo root
+_*.py
+_*.json
+_spike_*/
+_inspect_*/
+
+# Local results dump
+results/*.csv
+results/*.npz
+results/*.html
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# OS files
+*.log
+*.tmp

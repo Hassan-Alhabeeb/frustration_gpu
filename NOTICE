@@ -1,0 +1,17 @@
+frustration_gpu
+Copyright 2026 Hassan Alhabeeb
+
+This product implements algorithms from:
+- Davtyan et al. (2012) AWSEM - https://doi.org/10.1021/jp212541y
+- Ferreiro et al. (2007) frustration index - https://doi.org/10.1073/pnas.0709915104
+- Parra et al. (2016) Frustratometer 2 - https://doi.org/10.1093/nar/gkw304
+- Rausch et al. (2021) frustratometeR - https://doi.org/10.1093/bioinformatics/btab176
+
+Compared against:
+- LAMMPS-AWSEM (adavtyan/awsemmd) - https://github.com/adavtyan/awsemmd
+- LAMMPS (Thompson et al. 2022) - https://doi.org/10.1016/j.cpc.2021.108171
+- OpenAWSEM (Lu et al. 2021) - https://doi.org/10.1371/journal.pcbi.1008308
+
+Built on:
+- PyTorch (Paszke et al. 2019)
+- Biopython (Cock et al. 2009) - https://doi.org/10.1093/bioinformatics/btp163

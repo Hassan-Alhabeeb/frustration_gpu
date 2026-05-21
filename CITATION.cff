@@ -1,0 +1,289 @@
+cff-version: 1.2.0
+message: "If you use frustration_gpu in your research, please cite the software and the original AWSEM + frustration methodology papers."
+title: "frustration_gpu: Pure-PyTorch LAMMPS-AWSEM Frustration Analysis with GPU Acceleration"
+version: 0.1.0
+date-released: 2026-05-20
+authors:
+  - family-names: Alhabeeb
+    given-names: Hassan
+type: software
+license: Apache-2.0
+repository-code: "https://github.com/Hassan-Alhabeeb/frustration_gpu"
+keywords:
+  - frustration
+  - AWSEM
+  - protein
+  - allosteric
+  - GPU
+  - PyTorch
+  - structural-biology
+  - biophysics
+abstract: >
+  A pure-PyTorch reimplementation of the LAMMPS-AWSEM frustration
+  analyzer (Wolynes-lab AWSEM Hamiltonian with the Ferreiro frustration
+  index). Provides GPU-accelerated configurational, mutational, and
+  single-residue frustration analysis on protein PDB structures, with
+  byte-comparable output to the LAMMPS-AWSEM + frustratometeR
+  reference pipeline. Supports an opt-in Debye-Hückel electrostatics
+  term and a set of LAMMPS-compatibility flags for byte-comparable
+  parity on protein-DNA complexes and alt-conformer PDBs.
+
+references:
+  - type: article
+    title: "Localizing frustration in native proteins and protein assemblies"
+    authors:
+      - family-names: Ferreiro
+        given-names: Diego U.
+      - family-names: Hegler
+        given-names: Joseph A.
+      - family-names: Komives
+        given-names: Elizabeth A.
+      - family-names: Wolynes
+        given-names: Peter G.
+    journal: "Proceedings of the National Academy of Sciences"
+    year: 2007
+    volume: 104
+    issue: 50
+    start: 19819
+    end: 19824
+    doi: "10.1073/pnas.0709915104"
+    notes: "Original definition of the local frustration index used in this software."
+
+  - type: article
+    title: "AWSEM-MD: protein structure prediction using coarse-grained physical potentials and bioinformatically based local structure biasing"
+    authors:
+      - family-names: Davtyan
+        given-names: Aram
+      - family-names: Schafer
+        given-names: Nicholas P.
+      - family-names: Zheng
+        given-names: Weihua
+      - family-names: Clementi
+        given-names: Cecilia
+      - family-names: Wolynes
+        given-names: Peter G.
+      - family-names: Papoian
+        given-names: Garegin A.
+    journal: "The Journal of Physical Chemistry B"
+    year: 2012
+    volume: 116
+    issue: 29
+    start: 8494
+    end: 8503
+    doi: "10.1021/jp212541y"
+    notes: "AWSEM Hamiltonian (Water + Burial + Direct + Mediated contact terms) used here."
+
+  - type: article
+    title: "OpenAWSEM with Open3SPN2: A fast, flexible, and accessible framework for large-scale coarse-grained biomolecular simulations"
+    authors:
+      - family-names: Lu
+        given-names: Wei
+      - family-names: Bueno
+        given-names: Carlos
+      - family-names: Schafer
+        given-names: Nicholas P.
+      - family-names: Moller
+        given-names: Joshua
+      - family-names: Jin
+        given-names: Shikai
+      - family-names: Chen
+        given-names: Xingcheng
+      - family-names: Chen
+        given-names: Mingchen
+      - family-names: Gu
+        given-names: Xun
+      - family-names: Davtyan
+        given-names: Aram
+      - family-names: de Pablo
+        given-names: Juan J.
+      - family-names: Wolynes
+        given-names: Peter G.
+    journal: "PLOS Computational Biology"
+    year: 2021
+    volume: 17
+    issue: 2
+    doi: "10.1371/journal.pcbi.1008308"
+    notes: "Reference Python implementation of AWSEM (gamma-table layout / parameter sources)."
+
+  - type: software
+    title: "LAMMPS-AWSEM (AWSEM-MD plugin)"
+    authors:
+      - family-names: Davtyan
+        given-names: Aram
+    repository-code: "https://github.com/adavtyan/awsemmd"
+    notes: "Original C++ implementation (fix_backbone.cpp). frustration_gpu reproduces its tertiary-frustration analysis numerically."
+
+  - type: article
+    title: "FrustratometeR: an R-package to compute local frustration in protein structures, point mutants and MD simulations"
+    authors:
+      - family-names: Rausch
+        given-names: Andreas Owen
+      - family-names: Freiberger
+        given-names: Maria Inés
+      - family-names: Bibic
+        given-names: Camila R.
+      - family-names: Wolynes
+        given-names: Peter G.
+      - family-names: Ferreiro
+        given-names: Diego U.
+    journal: "Bioinformatics"
+    year: 2021
+    volume: 37
+    issue: 18
+    start: 3038
+    end: 3040
+    doi: "10.1093/bioinformatics/btab176"
+    notes: "Reference R/Perl post-processing pipeline. Welltype + FrstState classification rules adopted here. Software repo: https://github.com/proteinphysiologylab/frustratometeR"
+
+  - type: article
+    title: "Protein Frustratometer 2: a tool to localize energetic frustration in protein molecules, now with electrostatics"
+    authors:
+      - family-names: Parra
+        given-names: R. Gonzalo
+      - family-names: Schafer
+        given-names: Nicholas P.
+      - family-names: Radusky
+        given-names: Leandro G.
+      - family-names: Tsai
+        given-names: Min-Yeh
+      - family-names: Guzovsky
+        given-names: A. Brenda
+      - family-names: Wolynes
+        given-names: Peter G.
+      - family-names: Ferreiro
+        given-names: Diego U.
+    journal: "Nucleic Acids Research"
+    year: 2016
+    volume: 44
+    issue: W1
+    start: W356
+    end: W360
+    doi: "10.1093/nar/gkw304"
+    notes: "Predecessor server paper for the Welltype/FrstState three-state classification inherited from frustratometeR."
+
+  - type: article
+    title: "LAMMPS - a flexible simulation tool for particle-based materials modeling at the atomic, meso, and continuum scales"
+    authors:
+      - family-names: Thompson
+        given-names: Aidan P.
+      - family-names: Aktulga
+        given-names: H. Metin
+      - family-names: Berger
+        given-names: Richard
+      - family-names: Bolintineanu
+        given-names: Dan S.
+      - family-names: Brown
+        given-names: W. Michael
+      - family-names: Crozier
+        given-names: Paul S.
+      - family-names: in 't Veld
+        given-names: Pieter J.
+      - family-names: Kohlmeyer
+        given-names: Axel
+      - family-names: Moore
+        given-names: Stan G.
+      - family-names: Nguyen
+        given-names: Trung Dac
+      - family-names: Shan
+        given-names: Ray
+      - family-names: Stevens
+        given-names: Mark J.
+      - family-names: Tranchida
+        given-names: Julien
+      - family-names: Trott
+        given-names: Christian
+      - family-names: Plimpton
+        given-names: Steven J.
+    journal: "Computer Physics Communications"
+    year: 2022
+    volume: 271
+    start: 108171
+    doi: "10.1016/j.cpc.2021.108171"
+    notes: "LAMMPS engine underlying the LAMMPS-AWSEM reference dumps used for numerical validation."
+
+  - type: article
+    title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
+    authors:
+      - family-names: Paszke
+        given-names: Adam
+      - family-names: Gross
+        given-names: Sam
+      - family-names: Massa
+        given-names: Francisco
+      - family-names: Lerer
+        given-names: Adam
+      - family-names: Bradbury
+        given-names: James
+      - family-names: Chanan
+        given-names: Gregory
+      - family-names: Killeen
+        given-names: Trevor
+      - family-names: Lin
+        given-names: Zeming
+      - family-names: Gimelshein
+        given-names: Natalia
+      - family-names: Antiga
+        given-names: Luca
+      - family-names: Desmaison
+        given-names: Alban
+      - family-names: Köpf
+        given-names: Andreas
+      - family-names: Yang
+        given-names: Edward
+      - family-names: DeVito
+        given-names: Zachary
+      - family-names: Raison
+        given-names: Martin
+      - family-names: Tejani
+        given-names: Alykhan
+      - family-names: Chilamkurthy
+        given-names: Sasank
+      - family-names: Steiner
+        given-names: Benoit
+      - family-names: Fang
+        given-names: Lu
+      - family-names: Bai
+        given-names: Junjie
+      - family-names: Chintala
+        given-names: Soumith
+    conference:
+      name: "Advances in Neural Information Processing Systems 32"
+    year: 2019
+    start: 8024
+    end: 8035
+    url: "https://papers.neurips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library"
+    notes: "Runtime tensor / autograd library. All computation in this package runs in pure PyTorch."
+
+  - type: article
+    title: "Biopython: freely available Python tools for computational molecular biology and bioinformatics"
+    authors:
+      - family-names: Cock
+        given-names: Peter J. A.
+      - family-names: Antao
+        given-names: Tiago
+      - family-names: Chang
+        given-names: Jeffrey T.
+      - family-names: Chapman
+        given-names: Brad A.
+      - family-names: Cox
+        given-names: Cymon J.
+      - family-names: Dalke
+        given-names: Andrew
+      - family-names: Friedberg
+        given-names: Iddo
+      - family-names: Hamelryck
+        given-names: Thomas
+      - family-names: Kauff
+        given-names: Frank
+      - family-names: Wilczynski
+        given-names: Bartek
+      - family-names: de Hoon
+        given-names: Michiel J. L.
+    journal: "Bioinformatics"
+    year: 2009
+    volume: 25
+    issue: 11
+    start: 1422
+    end: 1423
+    doi: "10.1093/bioinformatics/btp163"
+    notes: "PDB parsing and altloc handling in src/parser.py."
