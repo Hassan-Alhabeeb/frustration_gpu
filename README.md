@@ -5,6 +5,8 @@ Pure-PyTorch reimplementation of LAMMPS-AWSEM frustration analysis. 14 to 53x fa
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-223_passing-brightgreen.svg)](tests/)
+[![PyPI](https://img.shields.io/pypi/v/frustration-gpu.svg)](https://pypi.org/project/frustration-gpu/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20323294.svg)](https://doi.org/10.5281/zenodo.20323294)
 
 ```python
 from frustration_gpu import compute_frustration
@@ -130,6 +132,21 @@ print(result.density_records.head())
 ## Citation
 
 If you use this software, please cite both the original AWSEM / frustration work and this port. See [CITATION.cff](CITATION.cff) for machine-readable citation metadata, and [NOTICE](NOTICE) for full algorithmic provenance.
+
+This software is archived on Zenodo. The concept DOI `10.5281/zenodo.20323294` always resolves to the latest release; each version has its own DOI as well.
+
+```bibtex
+@software{alhabeeb_frustration_gpu_2026,
+  author       = {Alhabeeb, Hassan},
+  title        = {frustration\_gpu: Pure-PyTorch LAMMPS-AWSEM Frustration Analysis with GPU Acceleration},
+  year         = 2026,
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.20323294},
+  url          = {https://doi.org/10.5281/zenodo.20323294},
+  orcid        = {0009-0001-4944-5567},
+  version      = {0.1.1}
+}
+```
 
 Primary references:
 

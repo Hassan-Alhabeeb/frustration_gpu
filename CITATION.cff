@@ -10,6 +10,15 @@ authors:
 type: software
 license: Apache-2.0
 repository-code: "https://github.com/Hassan-Alhabeeb/frustration_gpu"
+url: "https://pypi.org/project/frustration-gpu/"
+doi: "10.5281/zenodo.20323294"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.20323294"
+    description: "Concept DOI (always resolves to latest version)"
+  - type: doi
+    value: "10.5281/zenodo.20323295"
+    description: "Version DOI for v0.1.1"
 keywords:
   - frustration
   - AWSEM
