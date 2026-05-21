@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-21
+
+### Added
+- ORCID identifier for author in CITATION.cff (https://orcid.org/0009-0001-4944-5567)
+- Zenodo integration: GitHub releases are now archived to Zenodo, which mints a permanent DOI per release
+
+### Fixed
+- Hardware footnote in README/VALIDATION correctly identifies the local machine as AMD Ryzen 9 5900X (was "Intel CPU")
+
+### Internal
+- PyPI Trusted Publishing workflow added (publishes on every `v*` tag push, requires manual approval through GitHub `pypi` environment)
+- CI: tests/_paths.py and tests/__init__.py now tracked (were accidentally excluded by gitignore in v0.1.0); ruff workflow rewired to lint `frustration_gpu/` after the src/ rename
+
 ### Added
 - `NOTICE` file at repo root enumerating algorithmic provenance (Apache-2.0 §4(d)).
 - Citation upgrades in `CITATION.cff`: Parra 2016 (Frustratometer 2 server), Thompson 2022 (LAMMPS), Paszke 2019 (PyTorch), Cock 2009 (Biopython), and Rausch 2021 promoted from `software` to `article` with DOI.

@@ -1,11 +1,12 @@
 cff-version: 1.2.0
 message: "If you use frustration_gpu in your research, please cite the software and the original AWSEM + frustration methodology papers."
 title: "frustration_gpu: Pure-PyTorch LAMMPS-AWSEM Frustration Analysis with GPU Acceleration"
-version: 0.1.0
-date-released: 2026-05-20
+version: 0.1.1
+date-released: 2026-05-21
 authors:
   - family-names: Alhabeeb
     given-names: Hassan
+    orcid: "https://orcid.org/0009-0001-4944-5567"
 type: software
 license: Apache-2.0
 repository-code: "https://github.com/Hassan-Alhabeeb/frustration_gpu"
