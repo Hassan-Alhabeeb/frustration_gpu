@@ -39,21 +39,20 @@ from _paths import PDB_DIR  # noqa: E402
 from frustration_gpu._contact_common import (  # noqa: E402
     DIRECT_SPARSE_MIN_SAFE_A,
     MEDIATED_SPARSE_MIN_SAFE_A,
-    ContactContext,
     SparseContactContext,
     build_contact_context,
     dh_sparse_min_safe,
 )
-from frustration_gpu.burial import burial_density, burial_energy  # noqa: E402
+from frustration_gpu.burial import burial_density  # noqa: E402
 from frustration_gpu.debye_huckel import (  # noqa: E402
     debye_huckel_energy,
     debye_huckel_pair_energy,
 )
+from frustration_gpu.decoys import sample_configurational_decoys  # noqa: E402
 from frustration_gpu.direct_contact import (  # noqa: E402
     direct_contact_energy,
     direct_pair_energy,
 )
-from frustration_gpu.decoys import sample_configurational_decoys  # noqa: E402
 from frustration_gpu.parser import parse_pdb  # noqa: E402
 from frustration_gpu.singleresidue_decoys import (  # noqa: E402
     singleresidue_decoy_stats,
@@ -62,7 +61,6 @@ from frustration_gpu.water_mediated import (  # noqa: E402
     water_mediated_energy,
     water_mediated_pair_energy,
 )
-
 
 # --- fixtures ----------------------------------------------------------------
 

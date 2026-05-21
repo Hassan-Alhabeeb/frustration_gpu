@@ -39,10 +39,10 @@ from frustration_gpu.burial import (  # noqa: E402
 )
 from frustration_gpu.density import compute_residue_density  # noqa: E402
 from frustration_gpu.frustration import (  # noqa: E402
+    _aa_idx_to_letter,
     classify_frustration,
     emit_singleresidue_dat,
     welltype_from_contact,
-    _aa_idx_to_letter,
 )
 from frustration_gpu.parameters import (  # noqa: E402
     load_burial_gamma,

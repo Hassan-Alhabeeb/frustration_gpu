@@ -119,10 +119,9 @@ LOC budget: ~400 lines + this docstring.
 from __future__ import annotations
 
 import functools
+import warnings
 
 import torch
-
-import warnings
 
 from ._contact_common import (
     ContactContext,

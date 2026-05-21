@@ -60,11 +60,14 @@ LOC budget: ~300-400 lines + this docstring.
 """
 from __future__ import annotations
 
+import warnings
+
 import torch
 
 from ._contact_common import (
     ContactContext,
     _build_chain_index,
+    _check_no_dna_sentinel,
     _resolve_contact_coords,
     _validate_context_device,
     _validate_context_fingerprint,
@@ -85,7 +88,6 @@ from .decoys import (
     _dtype_to_str,
     lammps_dump_rho,
 )
-from ._contact_common import _check_no_dna_sentinel
 from .mutational_decoys import (
     PAIR_MIN_SEQ_SEP,
     _burial_residue_energy,
@@ -95,8 +97,6 @@ from .mutational_decoys import (
     _water_rho_terms,
 )
 from .parameters import BURIAL_KAPPA, BURIAL_RHO_MAX, BURIAL_RHO_MIN
-
-import warnings
 
 # ---------------------------------------------------------------------------
 # Precompute W_sr[i, α]: per-anchor per-alphabet contact-energy sum

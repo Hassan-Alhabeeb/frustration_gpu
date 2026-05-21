@@ -57,7 +57,6 @@ from dataclasses import dataclass
 
 import torch
 
-
 # --- Term-specific minimum-safe sparse cutoffs (Å) ----------------------------
 # When a SparseContactContext is used, pairs beyond ``sparse_cutoff`` are
 # DROPPED from the sum. For each AWSEM contact term, the integrand is
@@ -128,7 +127,7 @@ def _coords_fingerprint(t: torch.Tensor) -> tuple[int, int, float, float, float,
 
 
 def _validate_context_device(
-    ctx: "ContactContext | SparseContactContext",
+    ctx: ContactContext | SparseContactContext,
     requested_device: torch.device,
 ) -> None:
     """Raise ValueError if the context is on a different device than requested.
@@ -161,7 +160,7 @@ def _validate_context_device(
 
 
 def _validate_context_fingerprint(
-    ctx: "ContactContext | SparseContactContext",
+    ctx: ContactContext | SparseContactContext,
     coords: dict[str, torch.Tensor],
 ) -> None:
     """Raise ValueError if the ContactContext was built from different coords.
@@ -795,7 +794,7 @@ def _check_residue_types_in_range(residue_types: torch.Tensor) -> None:
 
 def _warn_sparse_cutoff(
     term_name: str,
-    ctx: "SparseContactContext",
+    ctx: SparseContactContext,
     min_safe_a: float,
     extra_advice: str = "",
 ) -> None:

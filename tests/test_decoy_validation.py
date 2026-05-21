@@ -19,7 +19,6 @@ These cover the DECOY-module input-validation bugs called out in the
 from __future__ import annotations
 
 import sys
-import time
 import warnings
 from pathlib import Path
 from unittest.mock import patch
@@ -35,14 +34,12 @@ from _paths import PDB_DIR  # noqa: E402
 
 from frustration_gpu.decoys import (  # noqa: E402
     compute_configurational_decoy_energy,
-    configurational_decoy_stats,
     lammps_dump_rho,
     sample_configurational_decoys,
 )
 from frustration_gpu.mutational_decoys import mutational_decoy_stats  # noqa: E402
 from frustration_gpu.parser import parse_pdb  # noqa: E402
 from frustration_gpu.singleresidue_decoys import (  # noqa: E402
-    _precompute_W_sr,
     singleresidue_decoy_stats,
 )
 
@@ -302,8 +299,8 @@ def test_singleresidue_oom_bound_at_large_n():
     below the cube-allocation budget. Comparing chunked vs forced one-shot
     on the same N gives a multiplicative reduction.
     """
-    import frustration_gpu.singleresidue_decoys as sr
     import frustration_gpu.mutational_decoys as md
+    import frustration_gpu.singleresidue_decoys as sr
 
     n = 5000
     coords = _make_synthetic_coords(n)
